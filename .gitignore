@@ -15,6 +15,7 @@ backups/
 .env
 .env.*
 
-# The public repository intentionally has no README files.
+# Keep incidental README files out; publish the approved root README.
 README*
 readme*
+!/README.md
