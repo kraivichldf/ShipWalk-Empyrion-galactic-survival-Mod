@@ -1,0 +1,5 @@
+Name: ShipWalk
+Description: ShipWalk shared passenger frames and coordinated vessel travel for CV/SV/HV
+Author: Local mod project
+Version: 0.4.12
+ModTargets: Client, PfServer, Dedi

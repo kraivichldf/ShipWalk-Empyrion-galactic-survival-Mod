@@ -1,0 +1,20 @@
+# Local build products, generated native fixtures, game files and diagnostics.
+**/bin/
+**/obj/
+dist/
+backups/
+.codex-analysis/
+.vs/
+*.user
+*.suo
+*.dll
+*.exe
+*.pdb
+*.zip
+*.log
+.env
+.env.*
+
+# The public repository intentionally has no README files.
+README*
+readme*
