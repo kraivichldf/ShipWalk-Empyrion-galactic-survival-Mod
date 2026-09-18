@@ -158,7 +158,7 @@ namespace ShipWalk
             bool removed = true;
             for (int i = attemptedHooks.Count - 1; i >= 0; i--)
                 try { harmony.Unpatch(attemptedHooks[i], HarmonyPatchType.All, HarmonyId); attemptedHooks.RemoveAt(i); }
-                catch (Exception error) { removed = false; api.LogError("[ShipWalk] Hook cleanup: " + error); }
+                catch (Exception error) { removed = false; Log.Error("[ShipWalk] Hook cleanup: " + error); }
             return removed;
         }
 
@@ -270,19 +270,19 @@ namespace ShipWalk
             if (failed) return;
             failed = true; control.Disable(); Options.Mode = RunMode.Off;
             Travel.CancelLocal("runtime stopped");
-            try { StopFrame("error", false); } catch (Exception cleanup) { api.LogError("[ShipWalk] Cleanup: " + cleanup); }
-            api.LogError("[ShipWalk] Local Frame Lab disabled: " + error);
+            try { StopFrame("error", false); } catch (Exception cleanup) { Log.Error("[ShipWalk] Cleanup: " + cleanup); }
+            Log.Error("[ShipWalk] Local Frame Lab disabled: " + error);
         }
         public void Command(List<string> args)
         {
             string command = args?.FirstOrDefault()?.ToLowerInvariant() ?? "status";
-            if (failed && command != "status") { Tell("Disabled after an error; inspect the client log and restart."); return; }
+            if (failed && command != "status") { Reply("Disabled after an error. Run status for details and restart."); return; }
             if (PlayfieldServer)
             {
                 if (command == "off") { Options.Mode = RunMode.Off; Momentum.Reset(); }
                 else if (command == "on") Options.Mode = RunMode.Experimental;
-                Log.Info("application=PlayfieldServer; nativeHandoff=" + (Options.Mode == RunMode.Experimental)
-                    + "; coastingShips=" + Momentum.Coasting.Count + "; " + Network.Status + "; failed=" + failed);
+                Reply("application=PlayfieldServer; nativeHandoff=" + (Options.Mode == RunMode.Experimental)
+                    + "; coastingShips=" + Momentum.Coasting.Count + "; " + Network.Status + "; failed=" + failed + "; error=" + Log.LastError);
                 return;
             }
             bool enable = command == "on" && args.Count == 1
@@ -294,20 +294,22 @@ namespace ShipWalk
                 control.Enable(); EnableMovement();
                 PrepareWhenAboard();
                 if (!Frame.HasSession)
-                { Tell("Enabled. ShipWalk follows your ship automatically; normal world movement applies outside."); return; }
+                { Reply("Enabled. ShipWalk follows your ship automatically; normal world movement applies outside."); return; }
             }
             else if (disable)
             { Travel.CancelLocal("command off"); control.Disable(); StopFrame("command off"); Options.Mode = RunMode.Diagnostics; }
-            else if (command == "trace" && args.Count == 2 && (args[1] == "on" || args[1] == "off")) Options.Trace = args[1] == "on";
-            else if (command == "peers" && args.Count == 1) { Peers.Capture(); Tell("Observed peer positions written to the client log."); return; }
-            else if (command == "network" && args.Count == 1) { Tell(Network.Status + "; " + Travel.Status); return; }
-            else if (command != "status") { Tell("Commands: on, off, status, network, peers, trace on|off. Enable anywhere; ship detection is automatic, seated or on foot."); return; }
-            Tell("enabled=" + control.Enabled + "; movement=" + (Frame.Active ? "Ship" : "World")
+            else if (command == "trace" && args.Count == 2 && (args[1] == "on" || args[1] == "off")) { Reply("Automatic logging and CSV tracing are available only in the dev build."); return; }
+            else if (command == "peers" && args.Count == 1) { Peers.Capture(); Reply("Observed peer positions printed above."); return; }
+            else if (command == "network" && args.Count == 1) { Reply(Network.Status + "; " + Travel.Status); return; }
+            else if (command != "status") { Reply("Commands: on, off, status, network, peers. Enable anywhere; ship detection is automatic, seated or on foot."); return; }
+            Reply("enabled=" + control.Enabled + "; movement=" + (Frame.Active ? "Ship" : "World")
                 + "; " + Frame.Status + "; application=" + api.Application.Mode
-                + "; " + Network.Status + "; " + Travel.Status + "; failed=" + failed);
+                + "; " + Network.Status + "; " + Travel.Status + "; failed=" + failed
+                + "; notice=" + Log.LastNotice + "; error=" + Log.LastError);
         }
         internal void Tell(string message)
-        { Log.Info(message); api.GUI?.ShowGameMessage("ShipWalk: " + message, prio: 1); }
+        { Log.Notice(message); }
+        private void Reply(string message) => Log.Reply(message);
         public void Dispose()
         {
             if (disposed) return;

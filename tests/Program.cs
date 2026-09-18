@@ -25,6 +25,9 @@ internal static class Program
     {
         try
         {
+            Test("release output emits only explicit replies and retains errors without log IO", QuietReleaseTests.CommandOnlyOutput);
+            Test("legacy Trace=true cannot reenable automatic logging", QuietReleaseTests.LegacyTraceConfig);
+            Test("release logger construction creates no log directory or CSV", QuietReleaseTests.NoTraceFiles);
             Test("recorded CV collision omission includes docked SV and removes it on undock", DockingTests.RecordedCollisionOmission);
             Test("docking roots retain airborne/seat association and reject unrelated or cyclic graphs", DockingTests.RootAndAssociation);
             Test("undock and redock preserve world position facing and linear/angular momentum", DockingTests.ContinuousRebase);
@@ -256,7 +259,7 @@ internal static class Program
             Test("configuration defaults to non-mutating diagnostics", () =>
             {
                 var settings = Settings.Load(Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".missing"));
-                Check(settings.Mode == RunMode.Diagnostics && settings.Trace && !settings.PreserveInterior && settings.AllowMovingSeatExit && settings.PreserveExitMomentum);
+                Check(settings.Mode == RunMode.Diagnostics && !settings.Trace && !settings.PreserveInterior && settings.AllowMovingSeatExit && settings.PreserveExitMomentum);
             });
             Test("seat-exit configuration can disable and re-enable the feature", () =>
             {

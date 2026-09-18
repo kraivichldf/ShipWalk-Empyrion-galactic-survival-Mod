@@ -17,11 +17,9 @@ namespace ShipWalk
         private readonly Dictionary<Guid, Record> records = new Dictionary<Guid, Record>();
         private readonly Dictionary<Guid, DateTime> completed = new Dictionary<Guid, DateTime>();
         public TravelHub(IModApi api) : this((receiver, world, bytes) => api.Network.SendToPlayfieldServer(receiver, world, bytes),
-            message => api.Log(message), message => api.LogWarning(message), () => DateTime.UtcNow)
+            message => { }, message => { }, () => DateTime.UtcNow)
         {
             if (!api.Network.RegisterReceiverForPlayfieldPackets(Receive)) throw new InvalidOperationException("Travel coordinator receiver already registered.");
-            api.Log("[ShipWalk] Loaded v" + typeof(TravelHub).Assembly.GetName().Version.ToString(3)
-                + "; Dedicated travel coordinator ready; startup=automatic; native world transfer retained.");
         }
         internal TravelHub(Func<string, string, byte[], bool> send, Action<string> log, Action<string> warn, Func<DateTime> clock)
         { this.send = send; this.log = log; this.warn = warn; this.clock = clock; }

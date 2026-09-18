@@ -37,10 +37,9 @@ namespace ShipWalk
                 Exception cause = error.GetBaseException();
                 initializationError = cause.GetType().Name + ": " + cause.Message;
                 try { runtime?.Dispose(); }
-                catch (Exception cleanupError) { api.LogError("[ShipWalk] Initialization cleanup: " + cleanupError); }
+                catch (Exception cleanupError) { initializationError += "; cleanup: " + cleanupError.GetBaseException().Message; }
                 runtime = null;
                 AppDomain.CurrentDomain.AssemblyResolve -= ResolveDependency;
-                api.LogError("[ShipWalk] Disabled during initialization: " + error);
             }
         }
 
@@ -60,7 +59,7 @@ namespace ShipWalk
         private void Update()
         {
             try { if (hub != null) hub.Update(); else runtime?.Update(); }
-            catch (Exception error) { if (hub != null) api.LogError("[ShipWalk] Travel hub: " + error); else runtime?.Fail(error); }
+            catch (Exception error) { if (hub != null) initializationError = error.GetBaseException().ToString(); else runtime?.Fail(error); }
         }
 
         private void GameEntered(bool entered) => runtime?.Reset(entered ? "game-entered" : "game-left");
@@ -76,8 +75,8 @@ namespace ShipWalk
         {
             try
             {
-                if (hub != null) { api.Log("[ShipWalk] Dedicated travel coordinator loaded."); return; }
-                if (runtime == null) { api?.LogWarning("[ShipWalk] Not loaded. " + initializationError + " See the client log for details."); return; }
+                if (hub != null) { api.Log("[ShipWalk] Dedicated travel coordinator loaded. " + initializationError); return; }
+                if (runtime == null) { api?.LogWarning("[ShipWalk] Not loaded. " + initializationError); return; }
                 runtime.Command(args);
             }
             catch (Exception error) { runtime?.Fail(error); }

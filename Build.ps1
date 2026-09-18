@@ -37,6 +37,7 @@ foreach ($role in @('Client','Coop','Standalone')) {
 }
 
 $package = Join-Path $PSScriptRoot 'dist\ShipWalk'
+& (Join-Path $PSScriptRoot 'Verify-ReleaseOutput.ps1') -GameRoot $resolvedGame
 $projectXml = [xml](Get-Content -LiteralPath (Join-Path $PSScriptRoot 'src\ShipWalk.csproj') -Raw)
 $version = $projectXml.Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
 $null = New-Item -ItemType Directory -Path $package -Force
