@@ -5,6 +5,18 @@ using ShipWalk;
 
 internal static class QuietReleaseTests
 {
+    public static void NoReconnectRecovery()
+    {
+        var assembly = typeof(ShipWalkMod).Assembly;
+        foreach (string name in new[] { "ReconnectCoordinator", "ReconnectHold", "ReconnectHub", "ReconnectLogin",
+            "ReconnectProtocol", "ReconnectPacket", "PassengerRecord", "PassengerStore" })
+            if (assembly.GetType("ShipWalk." + name) != null)
+                throw new Exception("Unfinished passenger reconnect feature was included in the public release: " + name);
+        if (typeof(Runtime).GetField("Reconnect", System.Reflection.BindingFlags.Instance
+            | System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public) != null)
+            throw new Exception("Public movement runtime still owns a reconnect controller.");
+    }
+
     public static void CommandOnlyOutput()
     {
         var output = new List<string>();

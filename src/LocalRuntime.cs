@@ -175,14 +175,14 @@ namespace ShipWalk
         public bool RunNativeController(Component controller)
         {
             BeforePhysics();
-            return !Frame.Owns(controller) && !Frame.OwnsArrival(controller);
+            return !Frame.Owns(controller) && !Frame.OwnsArrival(controller) && !Frame.OwnsPlacement(controller);
         }
         public void BeforeColliders(object ship, ref bool detailed, ref bool bounding)
         { if (Frame.NeedsBounding(ship) || (PlayfieldServer || OwnsShipPhysics) && Momentum.Coasting.WantsBounding(ship)) { detailed = false; bounding = true; } }
         public void AfterColliders(object ship)
         { Frame.SelectBounding(ship); Momentum.Coasting.AfterSelection(ship); }
         public void Disable(Component controller)
-        { if (Frame.Owns(controller)) StopFrame("native controller disabled", false); }
+        { if (Frame.Owns(controller) || Frame.OwnsPlacement(controller)) StopFrame("native controller disabled", false); }
 
         public void Update()
         {
@@ -255,7 +255,15 @@ namespace ShipWalk
                 if (!LocalFrameMath.IsVessel(vessel?.Type.ToString())) vessel = null;
             }
             object root = DockingVessels.Root(Map, Map.NativeEntity(vessel));
-            if (!control.ObserveContext(root == null ? (int?)null : Map.Id(root), seated, Frame.HasSession)) return;
+            System.Numerics.Vector3? retryPoint = null;
+            if (control.AwaitingPlacementRetry && root != null && player != null
+                && Map.EntityTransform.GetValue(root) is Transform carrier && carrier != null)
+            {
+                Vector3 point = Quaternion.Inverse(carrier.rotation) * (player.Position - Map.OriginOffset - carrier.position);
+                retryPoint = new System.Numerics.Vector3(point.x, point.y, point.z);
+            }
+            if (!control.ObserveContext(root == null ? (int?)null : Map.Id(root), seated, Frame.HasSession,
+                Time.realtimeSinceStartup, retryPoint)) return;
             try
             {
                 Frame.Arm(vessel, seated);
@@ -265,6 +273,8 @@ namespace ShipWalk
             catch (NotSupportedException error) { Tell("Could not prepare this ship: " + error.Message); }
             catch (InvalidOperationException error) { Tell("Could not prepare this ship: " + error.Message); }
         }
+        internal void RetryBoardingAfterPlacement(int shipId, System.Numerics.Vector3 point, float now)
+            => control.PlacementFailed(shipId, point, now);
         public void Fail(Exception error)
         {
             if (failed) return;
@@ -302,7 +312,7 @@ namespace ShipWalk
             else if (command == "peers" && args.Count == 1) { Peers.Capture(); Reply("Observed peer positions printed above."); return; }
             else if (command == "network" && args.Count == 1) { Reply(Network.Status + "; " + Travel.Status); return; }
             else if (command != "status") { Reply("Commands: on, off, status, network, peers. Enable anywhere; ship detection is automatic, seated or on foot."); return; }
-            Reply("enabled=" + control.Enabled + "; movement=" + (Frame.Active ? "Ship" : "World")
+            Reply("enabled=" + control.Enabled + "; movement=" + (Frame.Active ? "Ship" : Frame.HoldingPlacement ? "Boarding" : "World")
                 + "; " + Frame.Status + "; application=" + api.Application.Mode
                 + "; " + Network.Status + "; " + Travel.Status + "; failed=" + failed
                 + "; notice=" + Log.LastNotice + "; error=" + Log.LastError);

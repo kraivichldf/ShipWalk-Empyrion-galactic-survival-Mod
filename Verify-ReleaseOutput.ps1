@@ -9,6 +9,9 @@ function All-Types($type) {
 try {
     foreach ($root in $assembly.MainModule.Types) {
         foreach ($type in (All-Types $root)) {
+            if ($type.FullName -like 'ShipWalk.Reconnect*' -or $type.FullName -in @('ShipWalk.PassengerRecord', 'ShipWalk.PassengerStore')) {
+                throw "Unfinished passenger reconnect implementation found in public release: $($type.FullName)"
+            }
             foreach ($method in $type.Methods) {
                 if (-not $method.HasBody) { continue }
                 foreach ($instruction in $method.Body.Instructions) {
@@ -19,6 +22,11 @@ try {
                         ($owner -eq 'ShipWalk.TraceLog' -and $name -in @('Info','Event')) -or
                         ($owner -eq 'System.IO.File' -and $name -match '^(Write|Append|Create)')) {
                         throw "Automatic release output found: $($method.FullName) -> $target"
+                    }
+                    if (($owner -eq 'System.IO.FileStream' -and $name -in @('.ctor','Write','Flush')) -or
+                        ($owner -eq 'System.IO.File' -and $name -in @('Replace','Move','Delete')) -or
+                        ($owner -eq 'System.IO.Directory' -and $name -eq 'CreateDirectory')) {
+                        throw "File mutation found in public release: $($method.FullName) -> $target"
                     }
                     if ($owner -like 'Eleon*' -and $name -in @('Log','LogWarning','LogError')) {
                         $command = $type.FullName -eq 'ShipWalk.ShipWalkMod' -and $method.Name -eq 'ExecCommand'
@@ -34,4 +42,4 @@ try {
         throw 'Automatic peer diagnostic work remains in the release.'
     }
 } finally { $assembly.Dispose() }
-Write-Output 'PASS: quiet release has no popup, automatic trace, CSV/file-write or periodic peer-output calls; explicit console replies remain.'
+Write-Output 'PASS: no popup, automatic trace, periodic peer output, passenger reconnect implementation or disk mutations.'

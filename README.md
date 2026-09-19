@@ -47,6 +47,20 @@ ShipWalk uses a local reference-frame system to let players move relative to the
 
 ShipWalk is a separate mod; it does not replace the official game assemblies.
 
+## Docked seat-exit recovery in 0.4.16
+
+This build addresses the case where leaving a docked SV/HV seat failed character placement and discarded the carrier's local frame. It checks the completed native exit position, resolves collision from explicit proposed capsule positions, and retains the prepared interior during a short placement retry. Nearby alternatives require floor support and a clear route. Standing on the CV floor updates the occupied vessel to the CV before publishing the walking state.
+
+Seat-exit recovery follows the moving carrier for at most two seconds, then restores native control if placement remains blocked. Moving to a different position in the same ship can trigger a limited automatic retry. Search work is limited to one slice per physics step; it does not continually rebuild the interior. Public packages retain quiet output. If recovery expires, the last failure and blocking collider can be inspected with `mod exs status`.
+
+Update participating clients, the dedicated manager and every playfield worker together. Multiplayer startup remains automatic.
+
+## Logging out aboard a ship
+
+**The public 0.4.16 release does not save or restore your ship attachment across logout and rejoin.** If the ship moves while you are offline, ShipWalk will not move you back aboard it when you return. The game's normal login behavior applies.
+
+That unfinished feature remains on `dev`. The public client and server contain no reconnect lookup, movement hold, passenger save file handling or reconnect teleport. Existing experimental passenger files are left untouched. Walking, seating, docking, and coordinated planet/warp travel while connected remain available.
+
 ## Known issues
 
 This is still an experimental mod. Known issues include:
@@ -63,8 +77,10 @@ There may be other bugs, especially with ship layouts or situations I have not t
 
 That is the extent of my multiplayer testing so far. Larger groups, multiple occupied ships, and different server conditions may expose issues I have not encountered.
 
+The public 0.4.16 build passes **195 offline checks**, including seat-exit placement, docking, networking, travel and exclusion of passenger reconnect recovery, plus native binding checks for the supported client/co-op and standalone server assemblies. These checks do not replace live gameplay testing of the final public package.
+
 ## Release and development builds
 
 The **`main` branch and release builds** run without automatic ShipWalk popups or trace logging. Manual diagnostic commands remain available.
 
-The **`dev` branch** retains the tracing implementation for debugging.
+The **`dev` branch** retains tracing and experimental passenger reconnect recovery for testing. Files with `-dev-` in their names are development packages and still include that unfinished feature; use the client and server ZIPs from the public release for the version without reconnect recovery.

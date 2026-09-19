@@ -25,6 +25,18 @@ internal static class Program
     {
         try
         {
+            Test("boarding clearance queries each proposed capsule pose without a world physics step", BoardingPlacementTests.ProposedPoseClearance);
+            Test("capsule clearance bounds correction, handles conflicting surfaces and checks the final shift", BoardingPlacementTests.ClearanceBounds);
+            Test("recorded docked seat exit prefers completed native placement and rejects distant world poses", BoardingPlacementTests.RecordedSeatAndNativeExit);
+            Test("blocked placement retains its transaction and retries after geometry settles", BoardingPlacementTests.FailedRoundThenRecovery);
+            Test("duplicate seat acknowledgements and moving candidates cannot renew the exit hold", BoardingPlacementTests.DuplicateExpiryAndCancellation);
+            Test("multiple native controllers cannot multiply the exit-placement search budget", BoardingPlacementTests.OneSlicePerPhysicsStep);
+            Test("pending seat exit follows a moving carrier through a docking root change", BoardingPlacementTests.MovingCarrierAndRootChange);
+            Test("same-context boarding retry requires movement and has a fixed rebuild budget", BoardingPlacementTests.RetryRequiresMovementAndIsBounded);
+            Test("placement recovery expires and respects off, new vessels and session changes", BoardingPlacementTests.RetryContextIsolation);
+            Test("pending passenger stays in the server roster and CV floor handover reaches the observer", BoardingPlacementTests.PendingMembershipAndFloorHandover);
+            Test("compiled controller and cleanup paths retain placement ownership boundaries", BoardingPlacementTests.ControllerAndCleanupIntegration);
+            Test("public release contains no passenger reconnect controller or persistent store", QuietReleaseTests.NoReconnectRecovery);
             Test("release output emits only explicit replies and retains errors without log IO", QuietReleaseTests.CommandOnlyOutput);
             Test("legacy Trace=true cannot reenable automatic logging", QuietReleaseTests.LegacyTraceConfig);
             Test("release logger construction creates no log directory or CSV", QuietReleaseTests.NoTraceFiles);
