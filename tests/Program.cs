@@ -47,6 +47,13 @@ internal static class Program
             Test("disconnect and missing ship during recovery retain bounded non-destructive fallback", ReconnectTests.PendingDisconnectAndMissingShip);
             Test("reconnect survives worker handover without accepting old completion or replayed saves", ReconnectTests.CrossWorkerAndReplay);
             Test("confirmed destroyed vessel clears its record and releases recovery without a repeated login loop", ReconnectTests.ConfirmedDestroyedVessel);
+            Test("reconnect lookup never owns movement and late offers cannot seize the character", ReconnectLoginTests.LookupNeverOwnsMovement);
+            Test("confirmed restoration has its own non-renewable streaming deadline", ReconnectLoginTests.ConfirmedRestoreIsBounded);
+            Test("reconnect cancellation retries without holding and resets across logins", ReconnectLoginTests.CancellationRetriesAndReset);
+            Test("compiled reconnect ownership uses authenticated offers and avoids worker process identity", ReconnectLoginTests.ControllerAndIdentityIntegration);
+            Test("manager resolves worker actor identity and rejects a foreign account checkpoint", ReconnectTests.ManagerResolvesWorkerIdentity);
+            Test("manager identity binding keeps multiple passengers separate and validates worker sessions", ReconnectTests.ManagerAccountsStaySeparate);
+            Test("delayed vessel lookup and lost cancellation cannot re-hold the character or delete its record", ReconnectTests.DelayedLookupCancellation);
             Test("development output records diagnostics and retains explicit status", DevelopmentTraceTests.AutomaticOutput);
             Test("development trace option does not change movement options", DevelopmentTraceTests.TraceConfig);
             Test("development CSV tracing stays within its session budget", DevelopmentTraceTests.BoundedCsv);

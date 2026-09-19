@@ -1,10 +1,11 @@
 # ShipWalk — Empyrion Galactic Survival Mod
 
+> **Development branch:** tracing and experimental passenger reconnect recovery are enabled here. Reconnect recovery is unfinished and is excluded from the public 0.4.16 release on `main`.
+
 > **Development branch:** diagnostic builds keep automatic tracing. Packages have
-> `-dev-` in their filenames. The current 0.4.15 diagnostic build retains the
-> 0.4.15 movement and reconnect behavior to investigate cramped movement after
-> leaving a seat and a separate jetpack camera lock. It is not a verified fix.
-> Use the quiet release from `main` for the published package.
+> `-dev-` in their filenames. The 0.4.16 candidate corrects the reconnect hold
+> observed in the 0.4.15 logs. It passes offline checks; live multiplayer
+> acceptance is still pending. Published packages from `main` remain quiet.
 
 Empyrion is a great game for building ships, exploring star systems, and going on adventures with friends. But one missing feature has always bothered me: **being able to walk around a ship while it is moving.**
 
@@ -53,6 +54,14 @@ ShipWalk uses a local reference-frame system to let players move relative to the
 
 ShipWalk is a separate mod; it does not replace the official game assemblies.
 
+## Reconnect control correction in 0.4.16
+
+The 0.4.15 diagnostic logs exposed a reconnect check holding the character before the server had confirmed a saved passenger. That prevented normal boarding and left jetpack look input waiting on a controller that was not running.
+
+The initial lookup now leaves movement, camera control and automatic boarding available. Only an authenticated restoration offer can begin a temporary hold. An unanswered lookup expires after eight seconds; late offers cannot take control back. Confirmed restoration retains its separate 90-second deadline. The dedicated manager resolves each player's account from that player's server record, and cancellation retries until acknowledged.
+
+**This correction passes 212 offline checks and the native binding/API checks.** A local co-op test recorded normal boarding, walking, seat exits and jetpack rotation without the initial reconnect hold. Remote dedicated multiplayer and return to a moved vessel after logout remain unverified. Update participating clients, the dedicated manager and every playfield worker together when testing this development build.
+
 ## Docked seat-exit recovery in 0.4.15
 
 This build addresses the case where leaving a docked SV/HV seat failed character placement and discarded the carrier's local frame. It checks the completed native exit position, resolves collision from explicit proposed capsule positions, and retains the prepared interior during a short placement retry. Nearby alternatives require floor support and a clear route. Standing on the CV floor updates the occupied vessel to the CV before publishing the walking state.
@@ -69,7 +78,7 @@ The record follows the actual occupied vessel: logging out inside a docked SV fo
 
 Update the **dedicated manager, every playfield worker, and participating clients** together. Startup and recovery are automatic. Records begin after the updated client and server have observed the player aboard; this cannot recover a ship association from a logout made before the update. `mod exs off` clears the current association and disables recovery for that client until enabled again or the game restarts. Single-player reconnect recovery is outside this change.
 
-**Reconnect behavior has not yet been tested in a running multiplayer session.** The 205 offline checks above include the reconnect tests. The three-player testing described below covers the earlier movement implementation. Test logout/rejoin after movement, warp, server restart, and SV undocking before treating reconnect recovery as verified in your server setup.
+**Reconnect recovery has not yet passed live multiplayer acceptance.** The 0.4.15 diagnostic runs exposed the initial-lookup hold described above; 0.4.16 addresses that code path. The 212 offline checks include reconnect coverage. The three-player testing described below covers the earlier movement implementation. Test logout/rejoin after movement, warp, server restart, and SV undocking before treating reconnect recovery as verified in your server setup.
 
 ## Known issues
 

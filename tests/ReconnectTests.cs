@@ -205,4 +205,76 @@ internal static class ReconnectTests
             s.Send(q); Check(s.Sent.Last().Kind == ReconnectKind.Ready, "Destroyed vessel was retried on the same login.");
         }
     }
+    public static void ManagerResolvesWorkerIdentity()
+    {
+        using (var s = new Server())
+        {
+            s.Seed(); s.Restart(); var q = s.Query(); q.Identity = "";
+            Check(ReconnectProtocol.TryDecode(ReconnectProtocol.Encode(q), out var received) && received.Identity == "",
+                "Worker cannot defer account identity to the manager.");
+            s.Send(received); s.Locate(); var offer = s.Sent.Last();
+            Check(offer.Kind == ReconnectKind.Offer && offer.Identity == "player-a" && offer.Record.Identity == "player-a"
+                && offer.Record.Actor == q.Actor && q.Identity == "", "Manager did not bind the authenticated actor to its own account record.");
+            var complete = q.Copy(); complete.Kind = ReconnectKind.Complete; complete.Id = offer.Id; s.Send(complete);
+            Check(s.Sent.Last().Kind == ReconnectKind.Ready && s.Sent.Last().Identity == "player-a", "Identity-free completion lost the transaction.");
+            var foreign = q.Copy(); foreign.Kind = ReconnectKind.Save; foreign.Sequence = 1; foreign.Record = Record("player-b"); s.Send(foreign);
+            s.Hub.Shutdown();
+            Check(new PassengerStore(s.Disk.Folder).Find("player-a", 1004).Vessel == 5004
+                && new PassengerStore(s.Disk.Folder).Find("player-b", 1004) == null, "Identity normalization accepted another account's checkpoint.");
+        }
+    }
+    public static void ManagerAccountsStaySeparate()
+    {
+        using (var disk = new Sandbox())
+        {
+            var accounts = new Dictionary<int, ReconnectPlayer> {
+                [1004] = new ReconnectPlayer { Identity = "player-a", Area = "Orbit A", Online = true },
+                [1005] = new ReconnectPlayer { Identity = "player-b", Area = "Orbit A", Online = true } };
+            var sent = new List<ReconnectPacket>();
+            var hub = new ReconnectHub(() => disk.Folder, actor => accounts.TryGetValue(actor, out var p) ? p : null,
+                (id, callback) => { callback(new ReconnectVessel { Id = id, Area = "Orbit A" }); return true; },
+                (area, packet) => { sent.Add(packet.Copy()); return true; }, () => DateTime.UtcNow);
+            var queries = new List<ReconnectPacket>();
+            foreach (int actor in accounts.Keys)
+            {
+                var q = new ReconnectPacket { Kind = ReconnectKind.Query, Actor = actor, Source = "Orbit A",
+                    Epoch = Guid.NewGuid(), ClientSession = Guid.NewGuid() };
+                queries.Add(q); hub.Receive(q.Source, q);
+                Check(sent.Last().Identity == accounts[actor].Identity, "Second player inherited host/first-player identity.");
+                var save = q.Copy(); save.Kind = ReconnectKind.Save; save.Sequence = 1;
+                save.Record = Record(accounts[actor].Identity, actor); save.Record.Vessel = actor + 4000; hub.Receive(save.Source, save);
+            }
+            hub.Shutdown(); int count = sent.Count;
+            var unknown = queries[0].Copy(); unknown.Actor = 9999; hub.Receive(unknown.Source, unknown);
+            var stale = queries[0].Copy(); stale.Source = "Different Area"; hub.Receive(stale.Source, stale);
+            var wrongIdentity = queries[0].Copy(); wrongIdentity.Identity = "player-b"; hub.Receive(wrongIdentity.Source, wrongIdentity);
+            accounts[1004].Online = false; hub.Receive(queries[0].Source, queries[0]); accounts[1004].Online = true;
+            Check(sent.Count == count, "Unknown/offline actor, wrong area, or mismatched supplied identity was accepted.");
+            var clear = queries[0].Copy(); clear.Kind = ReconnectKind.Clear; clear.Sequence = 2; clear.ClientSession = Guid.NewGuid();
+            hub.Receive(clear.Source, clear);
+            Check(new PassengerStore(disk.Folder).Count == 2, "Foreign worker session cleared a saved account.");
+            clear.ClientSession = queries[0].ClientSession; hub.Receive(clear.Source, clear);
+            var store = new PassengerStore(disk.Folder);
+            Check(store.Count == 1 && store.Find("player-b", 1005).Vessel == 5005, "One actor's departure deleted another passenger.");
+            hub.Shutdown();
+        }
+    }
+    public static void DelayedLookupCancellation()
+    {
+        using (var s = new Server())
+        {
+            s.Seed(); s.Restart(); var q = s.Query(); q.Identity = "";
+            var login = new ReconnectLogin(); login.Begin(0); s.Send(q);
+            Check(s.Lookups.Count == 1 && !login.Restoring, "Waiting for a vessel lookup grabbed character control.");
+            Check(login.Expired(8), "Unanswered lookup has no normal-movement fallback."); login.Cancel();
+            // First cancellation is lost. A late reply must be ignored, then the retry closes the server attempt.
+            s.Locate(); Check(!login.AcceptOffer(9), "Delayed lookup stole the character after timeout.");
+            s.Send(q); var cancel = q.Copy(); cancel.Kind = ReconnectKind.Abort; s.Send(cancel);
+            Check(s.Sent.Last().Kind == ReconnectKind.Ready, "Retry did not close the pending server attempt.");
+            login.Finish(); s.Sent.Clear(); s.Now = s.Now.AddSeconds(3); s.Send(q); s.Locate();
+            Check(s.Sent.Count == 1 && s.Sent[0].Kind == ReconnectKind.Ready && !login.Restoring && !login.CancelPending,
+                "Cancelled lookup replayed a restore or retained ownership.");
+            Check(new PassengerStore(s.Disk.Folder).Count == 1, "Lookup timeout itself deleted a saved attachment.");
+        }
+    }
 }

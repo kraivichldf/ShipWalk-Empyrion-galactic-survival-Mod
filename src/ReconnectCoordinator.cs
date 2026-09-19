@@ -28,17 +28,19 @@ namespace ShipWalk
         private readonly Queue<Tuple<ReconnectPacket, NativeFrameEnvelope>> incoming = new Queue<Tuple<ReconnectPacket, NativeFrameEnvelope>>();
         private readonly Queue<ReconnectPacket> hub = new Queue<ReconnectPacket>();
         private readonly ReconnectHold hold;
+        private readonly ReconnectLogin login = new ReconnectLogin();
         private Guid epoch = Guid.NewGuid();
         private ReconnectPacket ticket;
-        private bool done, moved, completing, inhibited;
-        private float started = -1, nextQuery, nextArm, nextTeleport;
+        private bool moved, completing, inhibited;
+        private float nextQuery, nextArm, nextTeleport;
         private string fallbackArea, failure;
         private Vector3 fallbackPoint, fallbackRotation;
         public bool Routing { get; private set; }
-        public bool Blocking => owner.MultiplayerClient && !done;
-        public bool Restoring => Blocking && ticket != null;
-        public string Status => "reconnect=" + (owner.PlayfieldServer ? "Worker" : done ? "Ready" : ticket == null ? "Checking" : "Restoring")
-            + "; reconnectHold=" + hold.Held + "; reconnectAge=" + (started < 0 ? 0 : Now - started).ToString("F2")
+        public bool Blocking => owner.MultiplayerClient && login.Restoring;
+        public bool Restoring => Blocking;
+        public string Status => "reconnect=" + (owner.PlayfieldServer ? "Worker" : login.Finished ? "Ready" : login.Restoring ? "Restoring" : "Checking")
+            + "; reconnectHold=" + hold.Held + "; reconnectAge=" + login.Age(Now).ToString("F2")
+            + "; reconnectCancelPending=" + login.CancelPending
             + "; reconnectResult=" + (failure ?? "none");
         private static float Now => Time.realtimeSinceStartup;
         public ReconnectCoordinator(Runtime owner, IModApi api)
@@ -53,8 +55,8 @@ namespace ShipWalk
         {
             hold.Release();
             if (!left) return;
-            ticket = null; epoch = Guid.NewGuid(); moved = completing = false; done = inhibited;
-            started = -1; nextQuery = nextArm = nextTeleport = 0; fallbackArea = failure = null;
+            ticket = null; epoch = Guid.NewGuid(); moved = completing = false; login.Reset(inhibited);
+            nextQuery = nextArm = nextTeleport = 0; fallbackArea = failure = null;
         }
         public void Disable()
         {
@@ -104,13 +106,13 @@ namespace ShipWalk
             FramePeer peer = Network.PeerFor(actor, envelope.Playfield);
             if (!Network.Authenticated(peer, envelope.Connection, p.ClientSession, p.ServerSession)) return;
             IPlayer player = Map.Player(native);
-            if (player == null || string.IsNullOrEmpty(player.SteamId)) return;
+            if (player == null) return;
             string area = owner.Travel.Native.ContextName(envelope.Playfield);
             clients.TryGetValue(actor, out Client c);
             if (p.Kind == ReconnectKind.Query)
             {
                 if (c == null || c.Session != peer.Session)
-                { c = new Client { Epoch = p.Epoch, Session = peer.Session, Identity = player.SteamId, Area = area }; clients[actor] = c; }
+                { c = new Client { Epoch = p.Epoch, Session = peer.Session, Identity = "", Area = area }; clients[actor] = c; }
                 if (c.Epoch != p.Epoch || Now - c.Seen < .5f) return;
                 c.Seen = Now; SendHub(c, actor, p); return;
             }
@@ -131,10 +133,11 @@ namespace ShipWalk
         private void FromHub(ReconnectPacket p)
         {
             if (!clients.TryGetValue(p.Actor, out Client c) || p.Epoch != c.Epoch || p.ClientSession != c.Session
-                || p.Identity != c.Identity || p.Source != c.Area) return;
+                || string.IsNullOrEmpty(p.Identity) || (!string.IsNullOrEmpty(c.Identity) && p.Identity != c.Identity) || p.Source != c.Area) return;
             object actor = Transport.Entity(p.Actor); object context = Transport.Context(actor);
             FramePeer peer = Network.PeerFor(p.Actor, context);
             if (peer == null || peer.Session != c.Session) return;
+            c.Identity = p.Identity;
             if (p.Kind == ReconnectKind.Ready || p.Kind == ReconnectKind.Abort) { c.Ready = true; c.Offer = null; }
             else if (p.Kind == ReconnectKind.Offer && p.Record != null && p.Record.Identity == c.Identity)
             {
@@ -183,35 +186,49 @@ namespace ShipWalk
         private void FromServer(ReconnectPacket p, NativeFrameEnvelope envelope)
         {
             if (p.Epoch != epoch || !Network.AcceptReconnect(p, envelope)) return;
-            if (p.Kind == ReconnectKind.Abort && !done) { Abort(p.Reason, true); return; }
+            if (p.Kind == ReconnectKind.Abort && !login.Finished) { Abort(p.Reason, true); return; }
             if (p.Kind == ReconnectKind.Ready)
             {
                 if (ticket != null && !completing) return;
-                done = true; completing = false; ticket = null; hold.Release();
+                login.Finish(); completing = false; ticket = null; hold.Release();
                 if (!string.IsNullOrEmpty(p.Reason)) failure = p.Reason;
             }
-            else if (p.Kind == ReconnectKind.Offer && !done && p.Record != null && p.Record.Actor == p.Actor
-                && p.Id != Guid.Empty && (ticket == null || ticket.Id == p.Id)) ticket = p.Copy();
+            else if (p.Kind == ReconnectKind.Offer && p.Record != null && p.Record.Actor == p.Actor
+                && p.Id != Guid.Empty && (ticket == null || ticket.Id == p.Id))
+            {
+                if (!login.AcceptOffer(Now))
+                { if (login.CancelPending) SendCancellation(); return; }
+                if (ticket == null) owner.StopFrame("confirmed passenger restoration", false);
+                ticket = p.Copy();
+            }
         }
         private void UpdateClient()
         {
             if (inhibited) { hold.Release(); return; }
             IPlayer player = api.Application.LocalPlayer;
             if (api.Application.State != GameState.Running || player == null) { hold.Release(); return; }
-            if (started < 0 && Network.TravelReady)
+            if (Network.TravelReady && login.Begin(Now))
             {
-                started = Now; fallbackArea = api.ClientPlayfield?.Name;
+                fallbackArea = api.ClientPlayfield?.Name;
                 fallbackPoint = player.Position; fallbackRotation = player.Rotation.eulerAngles;
             }
             if (Network.TravelReady && Now >= nextQuery)
             {
                 nextQuery = Now + 2; Network.SendReconnect(Message(ReconnectKind.Query));
+                if (login.CancelPending) SendCancellation();
                 if (completing) Network.SendReconnect(Message(ReconnectKind.Complete));
             }
-            if (done || started < 0) return;
+            if (login.Finished || !login.Started) return;
             if (player.Health <= 0) { Network.SendReconnect(Message(ReconnectKind.Clear)); Abort("player died", false); return; }
-            if (Now - started > 90) { Abort("Ship restoration timed out; original login position restored.", true); return; }
+            if (login.Expired(Now))
+            {
+                Abort(login.Restoring ? "Ship restoration timed out; original login position restored."
+                    : "Reconnect lookup unavailable; normal movement retained for this login.", login.Restoring);
+                return;
+            }
+            if (!login.Restoring) { hold.Release(); return; }
             if (!owner.Frame.HasSession && player.DrivingEntity == null) hold.Hold();
+            else hold.Release();
             if (ticket == null || !Network.TravelReady || completing) return;
             if (player.DrivingEntity != null)
             {
@@ -263,9 +280,9 @@ namespace ShipWalk
         private void Abort(string reason, bool fallback)
         {
             if (reason.Length > 240) reason = reason.Substring(0, 240);
-            if (!done && api.Application.LocalPlayer != null)
-            { var p = Message(ReconnectKind.Abort); p.Reason = reason; Network.SendReconnect(p); }
-            bool restoring = Restoring; done = true; completing = false; ticket = null; failure = reason;
+            bool restoring = Restoring; login.Cancel(); completing = false; failure = reason;
+            if (api.Application.LocalPlayer != null) SendCancellation();
+            ticket = null;
             hold.Release(); if (restoring) owner.StopFrame("reconnect cancelled", false);
             if (fallback && moved && api.Application.State == GameState.Running && api.Application.LocalPlayer?.Health > 0
                 && !string.IsNullOrEmpty(fallbackArea) && api.Application.LocalPlayer.DrivingEntity == null)
@@ -274,6 +291,11 @@ namespace ShipWalk
                 try { Teleport(api.Application.LocalPlayer, fallbackArea, fallbackPoint, fallbackRotation); }
                 catch (Exception e) { failure += "; fallback: " + e.GetBaseException().Message; }
             }
+        }
+        private void SendCancellation()
+        {
+            var p = Message(ReconnectKind.Abort); p.Reason = failure ?? "Reconnect cancelled.";
+            Network.SendReconnect(p);
         }
         private static NV N(Vector3 v) => new NV(v.x, v.y, v.z);
         private static Vector3 U(NV v) => new Vector3(v.X, v.Y, v.Z);

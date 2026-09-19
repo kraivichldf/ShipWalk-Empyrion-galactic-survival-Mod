@@ -45,11 +45,12 @@ namespace ShipWalk
             Func<int, Action<ReconnectVessel>, bool> locate, Func<string, ReconnectPacket, bool> send, Func<DateTime> clock)
         { saveFolder = folder; this.player = player; this.locate = locate; this.send = send; this.clock = clock; }
 
-        private bool Current(ReconnectPacket p, string area)
+        private bool Current(ReconnectPacket p, string area, out string identity)
         {
             ReconnectPlayer live = player(p.Actor);
+            identity = live?.Identity;
             return live != null && live.Online && !string.IsNullOrEmpty(live.Identity)
-                && live.Identity == p.Identity && live.Area == area && p.Source == area;
+                && (string.IsNullOrEmpty(p.Identity) || live.Identity == p.Identity) && live.Area == area && p.Source == area;
         }
         public void Receive(string area, ReconnectPacket p)
         {
@@ -58,7 +59,11 @@ namespace ShipWalk
         }
         private void ReceiveCore(string area, ReconnectPacket p)
         {
-            if (!Current(p, area) || p.ClientSession == Guid.Empty) return;
+            if (!Current(p, area, out string identity) || p.ClientSession == Guid.Empty) return;
+            // The worker authenticates the native connection and actor. The
+            // manager resolves that actor's account; IPlayer.SteamId on workers
+            // reads process-wide settings in build 5150, not the remote player.
+            p = p.Copy(); p.Identity = identity;
             if (store == null) store = new PassengerStore(saveFolder());
             if (store.Error != null) { Reply(p, ReconnectKind.Ready, store.Error); return; }
             DateTime now = clock();
@@ -109,7 +114,7 @@ namespace ShipWalk
         {
             if (!attempts.TryGetValue(identity, out Attempt a) || !ReferenceEquals(a, expected)) return;
             a.Looking = false;
-            if (!a.Pending || a.Session != session || !Current(a.Query, a.Query.Source)) return;
+            if (!a.Pending || a.Session != session || !Current(a.Query, a.Query.Source, out _)) return;
             if (vessel != null && vessel.Id <= 0)
             {
                 store.Remove(identity); store.Flush(); a.Pending = false;
