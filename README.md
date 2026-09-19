@@ -45,6 +45,24 @@ So, with the help of **GPT-6 Astra**, I built ShipWalk.
 
 ShipWalk is a separate mod; it does not replace the official game assemblies.
 
+## Docked seat-exit recovery in 0.4.15
+
+This build addresses the case where leaving a docked SV/HV seat failed character placement and discarded the carrier's local frame. It checks the completed native exit position, resolves collision from explicit proposed capsule positions, and retains the prepared interior during a short placement retry. Nearby alternatives require floor support and a clear route. Standing on the CV floor updates the occupied vessel to the CV before publishing the walking state.
+
+Seat-exit recovery follows the moving carrier for at most two seconds, then restores native control if placement remains blocked. Moving to a different position in the same ship can trigger a limited automatic retry. Search work is limited to one slice per physics step; it does not continually rebuild the interior. Public packages retain quiet output. If recovery expires, the last failure and blocking collider can be inspected with `mod exs status`.
+
+**The 0.4.15 build passes 205 offline checks and the native binding/API checks. The dock/exit/walk/accelerate sequence still requires testing in a running dedicated-server session.** It also includes the reconnect work described below. Update participating clients, the dedicated manager and every playfield worker together.
+
+## Reconnect recovery
+
+The server now saves a validated passenger's position and facing relative to their occupied vessel. On reconnect, it looks up that vessel's current planet or space area, moves the player there, prepares local collision, and restores them aboard. Records live in the server's current save under `ShipWalk/passengers-v1.bin`, with a backup, so they can survive server restarts.
+
+The record follows the actual occupied vessel: logging out inside a docked SV follows that SV if it undocks while the player is offline. A returning walking player is restored standing, without taking another player's seat or pilot controls. Existing native seating is retained if the game already restores the player in the saved vessel. Blocked positions are checked for nearby clearance. Failed recovery releases the temporary hold and attempts to restore the original login position.
+
+Update the **dedicated manager, every playfield worker, and participating clients** together. Startup and recovery are automatic. Records begin after the updated client and server have observed the player aboard; this cannot recover a ship association from a logout made before the update. `mod exs off` clears the current association and disables recovery for that client until enabled again or the game restarts. Single-player reconnect recovery is outside this change.
+
+**Reconnect behavior has not yet been tested in a running multiplayer session.** The 205 offline checks above include the reconnect tests. The three-player testing described below covers the earlier movement implementation. Test logout/rejoin after movement, warp, server restart, and SV undocking before treating reconnect recovery as verified in your server setup.
+
 ## Known issues
 
 This is still an experimental mod. Known issues include:

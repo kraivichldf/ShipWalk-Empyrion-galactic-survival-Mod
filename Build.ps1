@@ -29,6 +29,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Verification failed.' }
 & (Join-Path $PSScriptRoot 'Verify-NetworkMetadata.ps1') -GameRoot $resolvedGame
 & (Join-Path $PSScriptRoot 'Verify-TravelMetadata.ps1') -GameRoot $resolvedGame
 & (Join-Path $PSScriptRoot 'Verify-StandaloneMetadata.ps1') -GameRoot $resolvedGame -StandaloneAssembly $StandaloneAssembly
+& (Join-Path $PSScriptRoot 'Verify-ReconnectApi.ps1') -GameRoot $resolvedGame -StandaloneAssembly $StandaloneAssembly
 $hostExecutable = Join-Path $PSHOME 'pwsh.exe'
 foreach ($role in @('Client','Coop','Standalone')) {
     $nativeAssembly = if ($role -eq 'Standalone') { $StandaloneAssembly } else { $gameAssembly }
@@ -60,6 +61,31 @@ $archive = Join-Path $PSScriptRoot "dist\ShipWalk-Multiplayer-$version-build5150
 # Use an explicit file list: never package referenced official assemblies or stale build outputs.
 $archiveFiles = @($manifestNames | ForEach-Object { Join-Path $package $_ }) + @((Join-Path $package 'manifest.json'))
 Compress-Archive -LiteralPath $archiveFiles -DestinationPath $archive -Force
+$serverArchive = Join-Path $PSScriptRoot "dist\ShipWalk-DedicatedServer-$version-build5150.zip"
+Add-Type -AssemblyName System.IO.Compression
+# Build the server tree directly from the verified file list; do not include staging leftovers.
+$zipStream = [IO.File]::Open($serverArchive, [IO.FileMode]::Create)
+$zip = [IO.Compression.ZipArchive]::new($zipStream, [IO.Compression.ZipArchiveMode]::Create)
+try {
+    foreach ($file in $archiveFiles) {
+        $entry = $zip.CreateEntry('Content/Mods/ShipWalk/' + [IO.Path]::GetFileName($file))
+        $inputFile = [IO.File]::OpenRead($file)
+        $outputFile = $entry.Open()
+        try { $inputFile.CopyTo($outputFile) } finally { $inputFile.Dispose(); $outputFile.Dispose() }
+    }
+} finally { $zip.Dispose(); $zipStream.Dispose() }
+$zip = [IO.Compression.ZipFile]::OpenRead($serverArchive)
+try {
+    if ($zip.Entries.Count -ne $archiveFiles.Count) { throw 'Unexpected dedicated package contents.' }
+    foreach ($file in $archiveFiles) {
+        $entry = $zip.GetEntry('Content/Mods/ShipWalk/' + [IO.Path]::GetFileName($file))
+        if ($null -eq $entry) { throw "Dedicated package entry missing: $file" }
+        $stream = $entry.Open(); $sha = [Security.Cryptography.SHA256]::Create()
+        try { $hash = [Convert]::ToHexString($sha.ComputeHash($stream)) } finally { $sha.Dispose(); $stream.Dispose() }
+        if ($hash -ne (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash) { throw "Dedicated package checksum mismatch: $file" }
+    }
+} finally { $zip.Dispose() }
 if ((Get-FileHash -LiteralPath $gameAssembly -Algorithm SHA256).Hash -ne $before) { throw 'Official assembly hash changed during the build.' }
 Write-Output "Verified package: $package"
 Write-Output "Archive: $archive"
+Write-Output "Dedicated archive: $serverArchive"

@@ -25,6 +25,28 @@ internal static class Program
     {
         try
         {
+            Test("boarding clearance queries each proposed capsule pose without a world physics step", BoardingPlacementTests.ProposedPoseClearance);
+            Test("capsule clearance bounds correction, handles conflicting surfaces and checks the final shift", BoardingPlacementTests.ClearanceBounds);
+            Test("recorded docked seat exit prefers completed native placement and rejects distant world poses", BoardingPlacementTests.RecordedSeatAndNativeExit);
+            Test("blocked placement retains its transaction and retries after geometry settles", BoardingPlacementTests.FailedRoundThenRecovery);
+            Test("duplicate seat acknowledgements and moving candidates cannot renew the exit hold", BoardingPlacementTests.DuplicateExpiryAndCancellation);
+            Test("multiple native controllers cannot multiply the exit-placement search budget", BoardingPlacementTests.OneSlicePerPhysicsStep);
+            Test("pending seat exit follows a moving carrier through a docking root change", BoardingPlacementTests.MovingCarrierAndRootChange);
+            Test("same-context boarding retry requires movement and has a fixed rebuild budget", BoardingPlacementTests.RetryRequiresMovementAndIsBounded);
+            Test("placement recovery expires and respects off, new vessels and session changes", BoardingPlacementTests.RetryContextIsolation);
+            Test("pending passenger stays in the server roster and CV floor handover reaches the observer", BoardingPlacementTests.PendingMembershipAndFloorHandover);
+            Test("compiled controller and cleanup paths retain placement ownership boundaries", BoardingPlacementTests.ControllerAndCleanupIntegration);
+            Test("reconnect wire preserves occupied-vessel pose and rejects malformed data", ReconnectTests.Codec);
+            Test("passenger records survive restart and stay scoped to account character and saved world", ReconnectTests.DurableStore);
+            Test("occupied-vessel local pose survives offline undocking and redocking without world-coordinate precision loss", ReconnectTests.DockingCoordinates);
+            Test("failed disk checkpoint retains pending save and succeeds after storage recovers", ReconnectTests.WriteFailureRetry);
+            Test("damaged passenger save recovers backup and never overwrites two corrupt copies", ReconnectTests.CorruptSave);
+            Test("reconnect follows warped occupied vessel after restart and completes only once", ReconnectTests.RestartAndWarp);
+            Test("reconnect rejects foreign identities old workers old sessions and late lookup callbacks", ReconnectTests.AuthorityAndStaleSessions);
+            Test("disconnect preserves saved attachment while death or real departure clears it", ReconnectTests.DisconnectRetainsDepartureClears);
+            Test("disconnect and missing ship during recovery retain bounded non-destructive fallback", ReconnectTests.PendingDisconnectAndMissingShip);
+            Test("reconnect survives worker handover without accepting old completion or replayed saves", ReconnectTests.CrossWorkerAndReplay);
+            Test("confirmed destroyed vessel clears its record and releases recovery without a repeated login loop", ReconnectTests.ConfirmedDestroyedVessel);
             Test("release output emits only explicit replies and retains errors without log IO", QuietReleaseTests.CommandOnlyOutput);
             Test("legacy Trace=true cannot reenable automatic logging", QuietReleaseTests.LegacyTraceConfig);
             Test("release logger construction creates no log directory or CSV", QuietReleaseTests.NoTraceFiles);

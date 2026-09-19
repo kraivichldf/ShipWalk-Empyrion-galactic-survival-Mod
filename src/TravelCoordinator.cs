@@ -74,11 +74,14 @@ namespace ShipWalk
         }
         private void ReceiveHub(string sender, string playfield, byte[] bytes)
         {
+            if (sender == "ShipWalk" && ReconnectProtocol.TryDecode(bytes, out ReconnectPacket recovery))
+            { owner.Reconnect.ReceiveHub(playfield, recovery); return; }
             if (sender != "ShipWalk" || !TravelProtocol.TryDecode(bytes, out TravelPacket p)) return;
             lock (fromHub) if (fromHub.Count < 128) fromHub.Enqueue(Tuple.Create(playfield, p));
         }
         public bool Boundary(object context, object actor)
         {
+            if (owner.MultiplayerClient && owner.Reconnect.Blocking) return false;
             if (!owner.MultiplayerClient || !owner.Frame.MatchesActor(actor) || Map.SeatedShip.GetValue(actor) != null) return true;
             // The native trigger is in the player update. A walking member must
             // test the ship boundary here, never fall into the player-only path.
@@ -87,6 +90,7 @@ namespace ShipWalk
         }
         public int RecoveryResult(int result, object actor)
         {
+            if (owner.MultiplayerClient && owner.Reconnect.OwnsActor(actor)) return TravelRecoveryPatch.Filter(result, true);
             if (owner.PlayfieldServer && Map.ShipType.IsInstanceOfType(actor)) return VesselRecovery(result, actor);
             bool owned = owner.MultiplayerClient && owner.Options.Mode == RunMode.Experimental
                 && api.Application.LocalPlayer?.Health > 0 && owner.Frame.OwnsActor(actor);
@@ -136,6 +140,8 @@ namespace ShipWalk
         }
         public bool WorldRequest(int reason)
         {
+            if (owner.Reconnect.Routing) return true;
+            if (owner.MultiplayerClient && owner.Reconnect.Blocking) return false;
             if (!owner.MultiplayerClient || owner.Options.Mode != RunMode.Experimental || reason != 6 && reason != 2) return true;
             IPlayer player = api.Application.LocalPlayer;
             object actor = player == null ? null : Map.NativeEntity(player);

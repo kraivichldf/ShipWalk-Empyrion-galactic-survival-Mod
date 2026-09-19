@@ -75,7 +75,7 @@ namespace ShipWalk
         {
             try
             {
-                if (hub != null) { api.Log("[ShipWalk] Dedicated travel coordinator loaded. " + initializationError); return; }
+                if (hub != null) { api.Log("[ShipWalk] Dedicated travel coordinator loaded. " + hub.Status + "; " + initializationError); return; }
                 if (runtime == null) { api?.LogWarning("[ShipWalk] Not loaded. " + initializationError); return; }
                 runtime.Command(args);
             }
@@ -92,7 +92,7 @@ namespace ShipWalk
             }
             runtime?.Dispose();
             runtime = null;
-            hub = null;
+            hub?.Shutdown(); hub = null;
             AppDomain.CurrentDomain.AssemblyResolve -= ResolveDependency;
         }
     }

@@ -38,6 +38,10 @@ namespace ShipWalk
         private int playerLayer, playerInclude, playerExclude, playerPriority;
         private double refreshMaxMs, nearbyMaxMs, selectionMaxMs;
         private float nextRefresh;
+        private Collider clearanceBlocker;
+        private float clearanceDepth;
+        private string clearanceFailure;
+        private readonly RaycastHit[] placementHits = new RaycastHit[64];
         public PhysicsScene Physics { get; private set; }
         public Rigidbody Player { get; private set; }
         public CapsuleCollider Capsule { get; private set; }
@@ -50,6 +54,10 @@ namespace ShipWalk
         public bool HasNativeOverrides => nativeFlags.Count != 0;
         public string Progress => phase + " " + processed + "/" + expected;
         public string EmptyMeshExample { get; private set; } = "none";
+        public string ClearanceStatus => clearanceFailure + "; blocker=" + (clearanceBlocker == null ? "none"
+            : clearanceBlocker.GetType().Name + ":" + clearanceBlocker.name + "; member="
+                + (solidOwners.TryGetValue(clearanceBlocker, out object member) && member != null ? map.Id(member) : -1))
+            + "; depth=" + clearanceDepth.ToString("F4");
         public string Metrics => "prepareSlices=" + preparation.Slices
             + "; prepareCpuMs=" + preparation.TotalMs.ToString("F3")
             + "; prepareMaxSliceMs=" + preparation.MaxSliceMs.ToString("F3")
@@ -429,27 +437,111 @@ namespace ShipWalk
 
         public bool ClearExit(Vector3 position, Quaternion rotation)
         {
-            Player.position = position; Player.rotation = rotation; Player.detectCollisions = true;
             FlushTransforms();
-            Vector3 start = position;
-            for (int pass = 0; pass < 8; pass++)
+            clearanceBlocker = null; clearanceDepth = 0; clearanceFailure = "clear";
+            bool clear = CapsuleClearance.Resolve(N(position), p => N(ClearanceCorrection(U(p), rotation)), out NVector solved);
+            if (!clear) { clearanceFailure = "overlap correction exhausted"; return false; }
+            SetPlayerPose(U(solved), rotation);
+            return true;
+        }
+        private void CapsulePose(Vector3 position, Quaternion rotation, out Vector3 shapePoint, out Quaternion shapeRotation,
+            out Vector3 a, out Vector3 b, out float radius)
+        {
+            shapePoint = position + rotation * Capsule.transform.localPosition;
+            shapeRotation = rotation * Capsule.transform.localRotation;
+            Vector3 scale = Capsule.transform.lossyScale;
+            int axis = Capsule.direction;
+            radius = Capsule.radius * Mathf.Max(Mathf.Abs(scale[(axis + 1) % 3]), Mathf.Abs(scale[(axis + 2) % 3]));
+            float half = Mathf.Max(0, Capsule.height * Mathf.Abs(scale[axis]) * .5f - radius);
+            Vector3 direction = shapeRotation * (axis == 0 ? Vector3.right : axis == 1 ? Vector3.up : Vector3.forward);
+            Vector3 centre = shapePoint + shapeRotation * Vector3.Scale(Capsule.center, scale);
+            a = centre + direction * half; b = centre - direction * half;
+        }
+        private Vector3 ClearanceCorrection(Vector3 position, Quaternion rotation)
+        {
+            CapsulePose(position, rotation, out Vector3 shapePoint, out Quaternion shapeRotation,
+                out Vector3 a, out Vector3 b, out float radius);
+            Bounds nearby = CapsuleBounds(a, b, radius);
+            float worst = .005f; Vector3 shift = Vector3.zero;
+            foreach (var entry in shapes.Entries)
             {
-                float worst = .005f; Vector3 shift = Vector3.zero;
-                Bounds nearby = Capsule.bounds; nearby.Expand(.01f);
-                foreach (var entry in shapes.Entries)
-                {
-                    Shape shape = entry.Value; Collider floor = shape.Copy;
-                    if (IsEnabled(floor) && nearby.Intersects(shape.Bounds)
-                        && UnityEngine.Physics.ComputePenetration(Capsule, Capsule.transform.position, Capsule.transform.rotation,
-                            floor, floor.transform.position, floor.transform.rotation, out Vector3 direction, out float distance)
-                        && distance > worst) { worst = distance; shift = direction * (distance + .005f); }
-                }
-                if (shift == Vector3.zero) return true;
-                position += shift;
-                if ((position - start).sqrMagnitude > .75f * .75f) return false;
-                Player.position = position;
+                Shape shape = entry.Value; Collider floor = shape.Copy;
+                if (IsEnabled(floor) && nearby.Intersects(shape.Bounds)
+                    && UnityEngine.Physics.ComputePenetration(Capsule, shapePoint, shapeRotation,
+                        floor, floor.transform.position, floor.transform.rotation, out Vector3 direction, out float distance)
+                    && distance > worst)
+                { worst = distance; shift = direction * (distance + .005f); clearanceBlocker = floor; clearanceDepth = distance; }
             }
-            return false;
+            return shift;
+        }
+        private static Bounds CapsuleBounds(Vector3 a, Vector3 b, float radius)
+            => new Bounds((a + b) * .5f, new Vector3(Mathf.Abs(a.x - b.x), Mathf.Abs(a.y - b.y), Mathf.Abs(a.z - b.z))
+                + Vector3.one * (radius * 2f + .01f));
+        private void SetPlayerPose(Vector3 position, Quaternion rotation)
+        {
+            Player.position = position; Player.rotation = rotation; Player.detectCollisions = true;
+            Player.transform.SetPositionAndRotation(position, rotation); dirty = true; FlushTransforms();
+        }
+        private bool PlacementPath(Vector3 from, Vector3 to, Quaternion rotation)
+        {
+            Vector3 motion = to - from; float distance = motion.magnitude;
+            if (distance < .001f) return true;
+            CapsulePose(from, rotation, out Vector3 point, out Quaternion facing, out Vector3 a, out Vector3 b, out float radius);
+            Bounds nearby = CapsuleBounds(a, b, radius);
+            // A cast omits starting overlaps. Permit escape only in the outward
+            // half-space of each starting penetration, never deeper through it.
+            foreach (var entry in shapes.Entries)
+            {
+                Collider other = entry.Value.Copy;
+                if (IsEnabled(other) && nearby.Intersects(entry.Value.Bounds) && UnityEngine.Physics.ComputePenetration(Capsule, point, facing, other,
+                    other.transform.position, other.transform.rotation, out Vector3 normal, out float depth)
+                    && depth > .005f && Vector3.Dot(motion, normal) < -.005f) return false;
+            }
+            int count = Physics.CapsuleCast(a, b, radius, motion / distance, placementHits, distance, 1, QueryTriggerInteraction.Ignore);
+            if (count == placementHits.Length) return false;
+            for (int i = 0; i < count; i++)
+                if (placementHits[i].distance < distance - .005f && Vector3.Dot(motion, placementHits[i].normal) < -.001f) return false;
+            return true;
+        }
+        public bool? ClearBoarding(BoardingPlacement placement, float now)
+        {
+            if (placement.Expired(now)) return false;
+            var timer = Stopwatch.StartNew();
+            while (placement.TryCandidate(now, out NVector sample, out bool needsSupport))
+            {
+                Vector3 candidate = U(sample), origin = U(placement.Preferred);
+                Quaternion rotation = new Quaternion(placement.Rotation.X, placement.Rotation.Y, placement.Rotation.Z, placement.Rotation.W);
+                if (!Contains(sample, BoardingPlacement.GroupPadding)) clearanceFailure = "candidate outside docking group";
+                else if (ClearExit(candidate, rotation))
+                {
+                    if (!Contains(N(Player.position), BoardingPlacement.GroupPadding)) clearanceFailure = "correction left docking group";
+                    else if (needsSupport && !Grounded(.12f)) clearanceFailure = "nearby candidate has no floor support";
+                    else if (!PlacementPath(needsSupport ? origin : candidate, Player.position, rotation)) clearanceFailure = "blocked route to candidate";
+                    else return true;
+                }
+                if (timer.Elapsed.TotalMilliseconds >= IncrementalWork.MillisecondsPerSlice) break;
+            }
+            return null;
+        }
+        private int reconnectCandidate;
+        public bool? ClearReconnect(Vector3 position, Quaternion rotation, Func<Vector3, bool> inside)
+        {
+            // Retain the arrival body lease while testing a bounded slice each frame.
+            var timer = System.Diagnostics.Stopwatch.StartNew();
+            do
+            {
+                int index = reconnectCandidate++;
+                Vector3 candidate = position;
+                if (index > 0)
+                {
+                    int direction = (index - 1) % 8, height = (index - 1) / 8 % 3, radius = (index - 1) / 24 + 1;
+                    float angle = direction * Mathf.PI / 4;
+                    candidate += new Vector3(Mathf.Cos(angle) * radius * .75f, height * .75f, Mathf.Sin(angle) * radius * .75f);
+                }
+                if (inside(candidate) && ClearExit(candidate, rotation) && inside(Player.position) && (index == 0 || Grounded(.5f))) return true;
+                if (reconnectCandidate >= 97) return false;
+            } while (timer.Elapsed.TotalMilliseconds < IncrementalWork.MillisecondsPerSlice);
+            return null;
         }
         public bool Grounded(float distance = .12f)
         {

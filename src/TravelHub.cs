@@ -16,9 +16,12 @@ namespace ShipWalk
         private readonly Queue<Tuple<string, string, byte[]>> incoming = new Queue<Tuple<string, string, byte[]>>();
         private readonly Dictionary<Guid, Record> records = new Dictionary<Guid, Record>();
         private readonly Dictionary<Guid, DateTime> completed = new Dictionary<Guid, DateTime>();
+        private readonly ReconnectHub reconnect;
+        public string Status => reconnect?.Status ?? "reconnect=unavailable";
         public TravelHub(IModApi api) : this((receiver, world, bytes) => api.Network.SendToPlayfieldServer(receiver, world, bytes),
             message => { }, message => { }, () => DateTime.UtcNow)
         {
+            reconnect = new ReconnectHub(api);
             if (!api.Network.RegisterReceiverForPlayfieldPackets(Receive)) throw new InvalidOperationException("Travel coordinator receiver already registered.");
         }
         internal TravelHub(Func<string, string, byte[], bool> send, Action<string> log, Action<string> warn, Func<DateTime> clock)
@@ -35,6 +38,8 @@ namespace ShipWalk
             {
                 Tuple<string, string, byte[]> item;
                 lock (incoming) { if (incoming.Count == 0) break; item = incoming.Dequeue(); }
+                if (ReconnectProtocol.TryDecode(item.Item3, out ReconnectPacket recovery))
+                { reconnect?.Receive(item.Item2, recovery); continue; }
                 if (!TravelProtocol.TryDecode(item.Item3, out TravelPacket p)) continue;
                 if (p.Kind == TravelKind.Manifest && p.Source == item.Item2 && p.Source != p.Destination
                     && !string.IsNullOrEmpty(p.Destination) && p.Leader > 0 && p.Members.Any(m => m.Actor == p.Leader))
@@ -74,6 +79,8 @@ namespace ShipWalk
                 send("ShipWalk", record.Packet.Destination, TravelProtocol.Encode(record.Packet));
             }
             foreach (Guid id in completed.Where(p => now >= p.Value).Select(p => p.Key).ToArray()) completed.Remove(id);
+            reconnect?.Update();
         }
+        public void Shutdown() => reconnect?.Shutdown();
     }
 }

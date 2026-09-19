@@ -38,6 +38,9 @@ namespace ShipWalk
 
         public void Receive(object packet)
         {
+            if (!faulted && Transport.CapturePayload(packet, out string reconnectText, out NativeFrameEnvelope reconnectEnvelope)
+                && ReconnectProtocol.TryEnvelope(reconnectText, out ReconnectPacket reconnect))
+            { owner.Reconnect.Receive(reconnect, reconnectEnvelope); return; }
             if (!faulted && Transport.CapturePayload(packet, out string payload, out NativeFrameEnvelope travelEnvelope)
                 && TravelProtocol.IsEnvelope(payload))
             { owner.Travel.Receive(payload, travelEnvelope); return; }
@@ -83,7 +86,11 @@ namespace ShipWalk
                     long accepted = relay.Accepted;
                     var deliveries = relay.Receive(id, envelope.Connection, envelope.Playfield, envelope.Message, now,
                         (message, previous) => Validate(actor, message, previous, now), CaptureShipPose);
-                    if (relay.Accepted != accepted) dockingMotion.Accepted(id, before, envelope.Message, now);
+                    if (relay.Accepted != accepted)
+                    {
+                        dockingMotion.Accepted(id, before, envelope.Message, now);
+                        owner.Reconnect.Capture(actor, envelope.Message);
+                    }
                     Deliver(deliveries);
                 }
                 else ReceiveClient(envelope, now);
@@ -108,7 +115,7 @@ namespace ShipWalk
                 }
                 if (serverSession != Guid.Empty && now - lastWelcome > 8)
                 { serverSession = Guid.Empty; passengers.Clear(); owner.Log.Info("Shared frame acknowledgement expired; reconnecting."); }
-                if (serverSession != Guid.Empty && now >= nextPublish)
+                if (serverSession != Guid.Empty && now >= nextPublish && (!owner.Reconnect.Blocking || owner.Frame.Active))
                 {
                     nextPublish = now + .05f;
                     FrameMessage state = owner.Frame.NetworkState() ?? new FrameMessage { Mode = PassengerMode.World };
@@ -231,6 +238,26 @@ namespace ShipWalk
         private void Send(FrameMessage message) { if (Transport.SendServer(message)) sent++; }
 
         internal bool TravelReady => !faulted && serverSession != Guid.Empty && Time.realtimeSinceStartup - lastWelcome <= 8;
+        internal bool Authenticated(FramePeer peer, object connection, Guid client, Guid server)
+            => relay.Authenticated(peer, connection, client, server);
+        internal bool AcceptReconnect(ReconnectPacket packet, NativeFrameEnvelope envelope)
+        {
+            IPlayer player = api.Application.LocalPlayer;
+            object actor = player == null ? null : map.NativeEntity(player);
+            return TravelReady && actor != null && player.Id == packet.Actor && ReferenceEquals(envelope.Playfield, Transport.Context(actor))
+                && packet.ClientSession == clientSession && packet.ServerSession == serverSession;
+        }
+        internal bool SendReconnect(ReconnectPacket packet)
+        {
+            if (!TravelReady) return false;
+            var copy = packet.Copy(); copy.ClientSession = clientSession; copy.ServerSession = serverSession;
+            return Transport.SendServerPayload(ReconnectProtocol.Envelope(copy));
+        }
+        internal bool SendReconnect(FramePeer peer, ReconnectPacket packet)
+        {
+            var copy = packet.Copy(); copy.ClientSession = peer.Session; copy.ServerSession = relay.Session;
+            return Transport.SendClientPayload(peer.Connection, ReconnectProtocol.Envelope(copy));
+        }
         internal FramePeer PeerFor(int id, object context) => relay.PeerFor(id, context, Time.realtimeSinceStartup);
         internal FramePeer[] Aboard(int ship, object context) => relay.Aboard(ship, context, Time.realtimeSinceStartup);
         internal bool AuthenticateTravel(TravelPacket packet, NativeFrameEnvelope envelope, out object actor, out FramePeer peer)

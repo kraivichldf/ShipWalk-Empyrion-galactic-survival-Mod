@@ -17,6 +17,10 @@ namespace ShipWalk
         private readonly Build5150 map;
         private readonly CharacterBodyLease lease = new CharacterBodyLease();
         private readonly CharacterBodyLease arrivalLease = new CharacterBodyLease();
+        private readonly CharacterBodyLease placementLease = new CharacterBodyLease();
+        private readonly BoardingPlacement placement = new BoardingPlacement();
+        private Vector3? nativeExitPoint;
+        private string placementFailure;
         private TravelMember arrivalMember;
         private readonly LocalPresentation presentation = new LocalPresentation();
         private readonly SeatOperationGate seatOperation = new SeatOperationGate();
@@ -61,6 +65,7 @@ namespace ShipWalk
         public bool Armed => geometry != null && geometry.Ready;
         public bool Active => lease.Held;
         public bool HoldingArrival => arrivalLease.Held;
+        public bool HoldingPlacement => placementLease.Held;
         public bool HasNativeOverrides => Active || (geometry?.HasNativeOverrides ?? false);
         // Keep this session's pose source fixed even if the application changes
         // role while leaving a game. Eligibility releases it before reboarding.
@@ -78,6 +83,8 @@ namespace ShipWalk
             + "; poseSource=" + (NetworkFrame ? "network-display" : "local-physics")
             + (NetworkFrame ? "; shipPose=" + shipFrame.State + "; awaitingOwner=" + shipFrame.AwaitingHandoff : "")
             + "; seatTransaction=" + (seatOperation.Busy ? "Native" : seatOperation.CanActivate(Time.fixedTime) ? "Ready" : "NextPhysics")
+            + "; exitPlacement=" + (placement.Pending ? "Pending" : "None")
+            + (placementFailure == null ? "" : "; clearance=" + placementFailure)
             + (geometry == null ? "" : "; " + geometry.Metrics)
             + (Preparing ? "; progress=" + geometry.Progress : "");
 
@@ -90,6 +97,7 @@ namespace ShipWalk
             && (Active || owner.Momentum.Coasting.Contains(ship) || map.SeatedShip.GetValue(actor) == null);
         public bool Owns(Component candidate) => Active && controller == candidate;
         public bool OwnsArrival(Component candidate) => HoldingArrival && controller == candidate;
+        public bool OwnsPlacement(Component candidate) => HoldingPlacement && controller == candidate;
         public bool OwnsActor(object candidate) => Active && ReferenceEquals(actor, candidate);
         public bool MatchesActor(object candidate) => Armed && ReferenceEquals(actor, candidate);
         public bool IsOwnHullRoomContact(Component room, Collider other)
@@ -116,7 +124,7 @@ namespace ShipWalk
                 || player.DrivingEntity?.Id != vessel.Id))
                 throw new NotSupportedException("Seat transition is not complete.");
             vessel = map.Entity(candidateShip);
-            bool restoring = arrival != null && owner.Travel.Restoring && arrival.Actor == player.Id && arrival.Ship == vessel.Id
+            bool restoring = arrival != null && (owner.Travel.Restoring || owner.Reconnect.Restoring) && arrival.Actor == player.Id && arrival.Ship == vessel.Id
                 && arrival.Mode != PassengerMode.Seated && TravelProtocol.MemberValid(arrival)
                 && DockingVessels.Group(map, candidateShip, api.ClientPlayfield?.Entities.Values)
                     .Any(member => DockingVessels.Contains(map, candidateShip, member, arrival.Position, 3));
@@ -125,6 +133,8 @@ namespace ShipWalk
                 && !DockingVessels.Member(map, candidateShip, map.NativeEntity(player.CurrentStructure?.Entity))))
                 throw new NotSupportedException("The character's current ship changed before preparation.");
             var candidateBody = (Rigidbody)map.ControllerBody.GetValue(candidate);
+            if (restoring && candidateBody != null && candidateBody.isKinematic)
+                throw new NotSupportedException("Waiting for the native walking body before restoring aboard.");
             var candidateShipBody = (Rigidbody)map.EntityBody.GetValue(candidateShip);
             var candidateHull = (Transform)map.EntityTransform.GetValue(candidateShip);
             var candidateCharacterRoot = (Transform)map.EntityTransform.GetValue(candidateActor);
@@ -159,6 +169,7 @@ namespace ShipWalk
             aboardShip = restoring && arrival.Member > 0 && api.ClientPlayfield.Entities.TryGetValue(arrival.Member, out IEntity arrivedMember)
                 ? map.NativeEntity(arrivedMember) : boarded;
             lastNetworkState = null;
+            placement.Reset(); nativeExitPoint = null; placementFailure = null;
             networkFrame = candidateNetworkFrame;
             body = candidateBody; shipBody = candidateShipBody; hull = candidateHull; nativeCapsule = capsule;
             characterRoot = candidateCharacterRoot;
@@ -204,6 +215,46 @@ namespace ShipWalk
             }
             arrivalMember = null;
         }
+        private void HoldPlacement()
+        {
+            if (!HoldingPlacement || !placement.Pending || body == null || hull == null || characterRoot == null || seatOperation.Busy) return;
+            if (!PlacementHoldIntact()) return;
+            Vector3 point = hull.position + hull.rotation * U(placement.Preferred);
+            body.position = point; body.transform.position = point; characterRoot.position = point;
+            // Keep native look input available during the short placement hold.
+            map.SetEntityPosition.Invoke(actor, new object[] { point + map.OriginOffset, false });
+            LocalFramePose frame = NetworkFrame ? shipFrame.Pose : ReadPose();
+            worldVelocity = DockingRebase.PointVelocity(frame, NetworkFrame ? shipFrame.Velocity : N(FrameVelocity),
+                NetworkFrame ? shipFrame.Angular : N(DockingVessels.Angular(map, ship, false)), frame.ToWorldPoint(placement.Preferred));
+        }
+        private bool PlacementHoldIntact() => body != null && body.isKinematic && body.detectCollisions
+            && nativeCapsule != null && nativeCapsule.isTrigger && body.gameObject.activeInHierarchy
+            && controller is Behaviour behaviour && behaviour.isActiveAndEnabled && map.SeatedShip.GetValue(actor) == null;
+        private void AcquirePlacement()
+        {
+            if (HoldingPlacement || !placement.FromSeat || HoldingArrival) return;
+            placementLease.Capture(body.isKinematic, body.detectCollisions, (int)body.interpolation, nativeCapsule.isTrigger);
+            body.isKinematic = true; body.detectCollisions = true;
+            body.interpolation = RigidbodyInterpolation.None; nativeCapsule.isTrigger = true;
+            HoldPlacement();
+        }
+        private void ReleasePlacement(bool inherit)
+        {
+            if (!placementLease.Release() || body == null) return;
+            if (body.isKinematic) body.isKinematic = placementLease.Kinematic;
+            if (body.detectCollisions) body.detectCollisions = placementLease.DetectCollisions;
+            if (body.interpolation == RigidbodyInterpolation.None) body.interpolation = (RigidbodyInterpolation)placementLease.Interpolation;
+            if (nativeCapsule != null && nativeCapsule.isTrigger) nativeCapsule.isTrigger = placementLease.Trigger;
+            if (inherit && !body.isKinematic && MotionMath.Finite(worldVelocity)) body.velocity = U(worldVelocity);
+        }
+        private void PlacementExpired()
+        {
+            owner.RetryBoardingAfterPlacement(ShipId, placement.Preferred, Time.realtimeSinceStartup);
+            owner.Log.Error("Boarding placement timed out; ship=" + ShipId + "; first=" + placementFailure
+                + "; last=" + geometry?.ClearanceStatus);
+            owner.Log.Info("LocalFrame placement expired; ship=" + ShipId + "; " + placementFailure);
+            owner.StopFrame("boarding placement timed out", true);
+        }
         internal void AcceptNativeTeleport(Vector3 point, Quaternion rotation)
         {
             if (!NetworkFrame || !Armed || hull == null) return;
@@ -237,7 +288,7 @@ namespace ShipWalk
                     haveFacing = false;
                     return;
                 }
-                if (!Active && !shipFrame.AwaitingHandoff) return;
+                if (!Active && !HoldingPlacement && !shipFrame.AwaitingHandoff) return;
                 ShipPoseState before = shipFrame.State;
                 ShipPoseState result = shipFrame.Resolve(observed, now, N(FrameVelocity));
                 LocalFramePose accepted = shipFrame.Pose;
@@ -399,10 +450,12 @@ namespace ShipWalk
         private void Activate()
         {
             if (!Armed || Active || map.SeatedShip.GetValue(actor) != null) return;
+            if (placement.Expired(Time.realtimeSinceStartup)) { PlacementExpired(); return; }
+            if (!UpdateDocking()) return;
             if (!seatOperation.CanActivate(Time.fixedTime)) return;
-            ReleaseArrival();
+            if (HoldingPlacement && !PlacementHoldIntact()) { owner.StopFrame("native controller reclaimed exit placement", false); return; }
             if (body == null || controller == null || !body.gameObject.activeInHierarchy
-                || !(controller is Behaviour behaviour) || !behaviour.isActiveAndEnabled || body.isKinematic) return;
+                || !(controller is Behaviour behaviour) || !behaviour.isActiveAndEnabled || body.isKinematic && !HoldingArrival && !HoldingPlacement) return;
             if (!Eligible()) { owner.StopFrame("unsupported character or ship state", false); return; }
             if (!LocalMovementAvailable()) return;
             if (!enteredFromSeat && !WithinShip(body.position))
@@ -435,11 +488,51 @@ namespace ShipWalk
             bool resumed = resumeAcceptedProxy && resumeSeatFrame && geometry.ResumeAcceptedPlayer(body, nativeCapsule, local, rotation);
             if (!resumed)
             {
-                geometry.ConfigurePlayer(body, nativeCapsule);
-                if (!geometry.ClearExit(local, rotation)) { owner.StopFrame("no safe local capsule clearance"); return; }
+                bool pending = placement.Pending;
+                if (!HoldingArrival)
+                {
+                    placement.Begin(N(local), nativeExitPoint.HasValue ? (NVector?)N(nativeExitPoint.Value) : null,
+                        N(rotation), enteredFromSeat && resumeSeatFrame, Time.realtimeSinceStartup);
+                    placement.TrackWalkingPoint(N(Quaternion.Inverse(hull.rotation) * (body.position - hull.position)));
+                    if (!placement.TryStep(Time.fixedTime)) return;
+                }
+                // Reconfigure only when native seat detach actually changed the
+                // capsule. Retrying must not rescan every hull collider per tick.
+                if (!pending || !geometry.ResumeAcceptedPlayer(body, nativeCapsule, local, rotation))
+                    geometry.ConfigurePlayer(body, nativeCapsule);
+                bool? clear;
+                if (HoldingArrival)
+                    clear = owner.Reconnect.Restoring ? geometry.ClearReconnect(local, rotation, p =>
+                        DockingVessels.Contains(map, ship, aboardShip, N(p), .25f)) : geometry.ClearExit(local, rotation);
+                else
+                {
+                    clear = geometry.ClearBoarding(placement, Time.realtimeSinceStartup);
+                }
+                if (!clear.HasValue)
+                {
+                    if (placement.Pending)
+                    {
+                        if (placementFailure == null)
+                        {
+                            placementFailure = geometry.ClearanceStatus;
+                            owner.Log.Info("LocalFrame placement pending; ship=" + ShipId + "; " + placementFailure);
+                        }
+                        AcquirePlacement();
+                    }
+                    return;
+                }
+                if (!clear.Value)
+                {
+                    if (owner.Reconnect.Restoring) owner.Reconnect.PlacementFailed();
+                    else if (placement.Pending) PlacementExpired();
+                    else owner.StopFrame("no safe local capsule clearance", false);
+                    return;
+                }
             }
             else owner.Log.Info("LocalFrame exit acknowledgement resumed accepted capsule; ship=" + ShipId);
             if (owner.Options.Trace) owner.Log.Info("LocalFrame lighting before attach; ship=" + ShipId + "; " + geometry.RoomStatus(body.position));
+            ReleaseArrival();
+            ReleasePlacement(false); placement.Reset(); nativeExitPoint = null; placementFailure = null;
             NVector boardingVelocity = N(body.velocity);
             // Complete overlap clearance before taking ownership of world physics.
             lease.Capture(body.isKinematic, body.detectCollisions, (int)body.interpolation, nativeCapsule.isTrigger);
@@ -458,6 +551,8 @@ namespace ShipWalk
             geometry.Player.velocity = U(pose.ToLocalVelocity(worldVelocity, frameVelocity));
             resumeSeatFrame = resumeAcceptedProxy = false;
             grounded = geometry.Grounded();
+            if (grounded && geometry.SupportEntity is object floorMember && DockingVessels.Member(map, ship, floorMember))
+                aboardShip = floorMember;
             climbing = map.Bool(map.ActorClimbing, actor);
             jetpackFlying = !climbing && JetpackEnabled && (FreeLook || !grounded || map.Bool(map.Jetpack, controller));
             map.LookAccumulator.SetValue(controller, Vector3.zero);
@@ -562,6 +657,8 @@ namespace ShipWalk
                     N(resumeSeatVelocity), oldLinear, oldAngular, nextLinear, nextAngular);
                 resumeSeatPoint = U(resumed.Position); resumeSeatHeading = U(resumed.Rotation); resumeSeatVelocity = U(resumed.Velocity);
             }
+            placement.Reframe(before, after);
+            if (nativeExitPoint.HasValue) nativeExitPoint = U(after.ToLocalPoint(before.ToWorldPoint(N(nativeExitPoint.Value))));
             presentation.Reframe(before, after); lastNetworkState = null;
             pendingDockRoot = null;
             sampledMember = aboardShip; memberSample = DockingVessels.Pose(map, aboardShip); memberSampleAt = Time.realtimeSinceStartup;
@@ -582,13 +679,16 @@ namespace ShipWalk
             if (geometry == null) return;
             if (!UpdateDocking()) return;
             HoldArrival();
+            if (placement.Expired(Time.realtimeSinceStartup)) { PlacementExpired(); return; }
             if (!Eligible()) { owner.StopFrame("ownership or character state changed", false); return; }
+            if (HoldingPlacement && !PlacementHoldIntact()) { owner.StopFrame("native controller reclaimed exit placement", false); return; }
+            HoldPlacement();
             if (Time.realtimeSinceStartup >= nextBoundsRefresh)
             {
                 nextBoundsRefresh = Time.realtimeSinceStartup + .5f;
                 shipBounds = ReadBounds(structure);
             }
-            if (Active && !LocalMovementAvailable()) { owner.StopFrame("native swimming control"); return; }
+            if ((Active || HoldingPlacement) && !LocalMovementAvailable()) { owner.StopFrame("native swimming control"); return; }
             if (Preparing)
             {
                 IPlayer player = api.Application.LocalPlayer;
@@ -811,6 +911,13 @@ namespace ShipWalk
             bool seated = ContainsShip(map.SeatedShip.GetValue(actor));
             if (!Active && !seated)
             {
+                if (HoldingPlacement && placement.Pending && geometry.Contains(placement.Preferred, BoardingPlacement.GroupPadding))
+                {
+                    // This is a bounded airborne hold, not a successful walking
+                    // placement. Keep the authenticated carrier membership alive.
+                    return new FrameMessage { Ship = ShipId, Member = aboardShip == null ? ShipId : map.Id(aboardShip),
+                        Position = placement.Preferred, Rotation = placement.Rotation, Velocity = NVector.Zero, Mode = PassengerMode.Jumping };
+                }
                 // Native seat callbacks briefly suspend the local capsule. This
                 // changes the character mode without ending ship membership.
                 if (lastNetworkState != null && (seatOperation.Busy || seatOperation.Settling(Time.time)))
@@ -830,6 +937,7 @@ namespace ShipWalk
 
         public void PublishRender(bool publishEntity = true)
         {
+            HoldPlacement();
             if (!Active || body == null || hull == null || characterRoot == null) return;
             ConsumeLocalLook();
             // Stay in Unity world coordinates here: adding a large absolute
@@ -870,10 +978,12 @@ namespace ShipWalk
         public void BeginSeatOperation(object destination)
         {
             if (!Armed) return;
+            ReleasePlacement(false);
             seatOperation.Begin();
-            if (destination != null) resumeAcceptedProxy = false;
+            if (destination != null)
+            { placement.Reset(); nativeExitPoint = null; placementFailure = null; resumeAcceptedProxy = resumeSeatFrame = false; }
             if (destination != null && ContainsShip(destination)) aboardShip = destination;
-            if (NetworkFrame && destination == null && ContainsShip(map.SeatedShip.GetValue(actor)))
+            if (destination == null && ContainsShip(map.SeatedShip.GetValue(actor)) && !placement.Pending)
             {
                 // Capture in the stable pre-detach frame. Native world placement
                 // during ownership changes must not redefine the local point.
@@ -881,7 +991,8 @@ namespace ShipWalk
                 resumeSeatVelocity = Vector3.zero;
                 LocalFrameMath.TryLocalHeading(N(hull.rotation), N(characterRoot.rotation), out NQuaternion heading);
                 resumeSeatHeading = U(heading); resumeSeatFrame = true; resumeAcceptedProxy = false;
-                if (map.Bool(map.ActorPiloting, actor) && ReferenceEquals(map.SeatedShip.GetValue(actor), ship)) shipFrame.BeginHandoff();
+                nativeExitPoint = null;
+                if (NetworkFrame && map.Bool(map.ActorPiloting, actor) && ReferenceEquals(map.SeatedShip.GetValue(actor), ship)) shipFrame.BeginHandoff();
             }
             // The server can acknowledge an exit after the local player is
             // already walking. Retain the accepted local pose across that
@@ -902,6 +1013,15 @@ namespace ShipWalk
             if (!Armed || !seatOperation.Busy) return;
             seatOperation.Complete(Time.fixedTime, Time.time);
             if (map.SeatedShip.GetValue(actor) == null) enteredFromSeat = true;
+            if (!seatOperation.Busy && enteredFromSeat && resumeSeatFrame && !resumeAcceptedProxy && !placement.Pending
+                && map.SeatedShip.GetValue(actor) == null && body != null && hull != null)
+            {
+                // Pair the completed native exit point with the hull pose from
+                // this same callback. Never subtract a later moving hull pose.
+                Vector3 point = Quaternion.Inverse(hull.rotation) * (body.position - hull.position);
+                if (BoardingPlacement.AcceptNative(N(resumeSeatPoint), N(point)) && geometry.Contains(N(point), BoardingPlacement.GroupPadding))
+                    nativeExitPoint = point;
+            }
             owner.Log.Info("LocalFrame native seat operation complete; ship=" + ShipId
                 + "; seated=" + (map.SeatedShip.GetValue(actor) != null) + "; resumeLocal=" + resumeSeatFrame
                 + "; shipRemote=" + map.Bool(map.EntityRemote, ship) + "; activation=next-fixed-step.");
@@ -948,6 +1068,7 @@ namespace ShipWalk
         public void Disarm(Action restoreNativeSelection, bool inherit)
         {
             ReleaseArrival();
+            ReleasePlacement(inherit); placement.Reset(); nativeExitPoint = null; placementFailure = null;
             pendingDockRoot = sampledMember = null;
             seatOperation.Reset(); resumeSeatFrame = resumeAcceptedProxy = false; lastNetworkState = null; haveFacing = false;
             LocalGeometry old = geometry;

@@ -44,13 +44,16 @@ namespace ShipWalk
                 // Docked entities need not advance their independent cached
                 // world position. Their actual relative transforms define the
                 // same attachment on the client and authoritative worker.
-                var parent = (Transform)map.EntityTransform.GetValue(frame);
-                var child = (Transform)map.EntityTransform.GetValue(member);
-                Quaternion q = Quaternion.Inverse(parent.rotation) * child.rotation;
-                var relative = new LocalFramePose(N(Quaternion.Inverse(parent.rotation) * (child.position - parent.position)), new NQ(q.x, q.y, q.z, q.w));
-                local = relative.ToLocalPoint(point);
+                local = RelativePose(map, frame, member).ToLocalPoint(point);
             }
             return LocalFrameSession.ReadBounds(map.Entity(member).Structure).Contains(local, padding);
+        }
+        internal static LocalFramePose RelativePose(Build5150 map, object frame, object member)
+        {
+            var parent = (Transform)map.EntityTransform.GetValue(frame);
+            var child = (Transform)map.EntityTransform.GetValue(member);
+            Quaternion q = Quaternion.Inverse(parent.rotation) * child.rotation;
+            return new LocalFramePose(N(Quaternion.Inverse(parent.rotation) * (child.position - parent.position)), new NQ(q.x, q.y, q.z, q.w));
         }
         internal static Vector3 Linear(Build5150 map, object ship, bool network)
         {

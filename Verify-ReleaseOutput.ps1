@@ -20,6 +20,13 @@ try {
                         ($owner -eq 'System.IO.File' -and $name -match '^(Write|Append|Create)')) {
                         throw "Automatic release output found: $($method.FullName) -> $target"
                     }
+                    if (($owner -eq 'System.IO.FileStream' -and $name -in @('.ctor','Write','Flush')) -or
+                        ($owner -eq 'System.IO.File' -and $name -in @('Replace','Move')) -or
+                        ($owner -eq 'System.IO.Directory' -and $name -eq 'CreateDirectory')) {
+                        if ($type.FullName -ne 'ShipWalk.PassengerStore' -or $method.Name -ne 'Flush') {
+                            throw "File mutation outside the server passenger save store: $($method.FullName) -> $target"
+                        }
+                    }
                     if ($owner -like 'Eleon*' -and $name -in @('Log','LogWarning','LogError')) {
                         $command = $type.FullName -eq 'ShipWalk.ShipWalkMod' -and $method.Name -eq 'ExecCommand'
                         $reply = $type.FullName -like 'ShipWalk.TraceLog/*'
@@ -34,4 +41,4 @@ try {
         throw 'Automatic peer diagnostic work remains in the release.'
     }
 } finally { $assembly.Dispose() }
-Write-Output 'PASS: quiet release has no popup, automatic trace, CSV/file-write or periodic peer-output calls; explicit console replies remain.'
+Write-Output 'PASS: no popup, automatic trace or periodic peer output; disk mutations are confined to the server passenger save store.'

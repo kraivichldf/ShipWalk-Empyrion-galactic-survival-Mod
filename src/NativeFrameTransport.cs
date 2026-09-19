@@ -84,7 +84,7 @@ namespace ShipWalk
         public bool IsFramePacket(object nativePacket)
         {
             int kind = Convert.ToInt32(variant.GetValue(nativePacket)); string text = payload.GetValue(nativePacket) as string;
-            return FrameProtocol.UseGameplayChannel(kind, text) || kind == 2 && TravelProtocol.IsEnvelope(text);
+            return FrameProtocol.UseGameplayChannel(kind, text) || kind == 2 && (TravelProtocol.IsEnvelope(text) || ReconnectProtocol.IsEnvelope(text));
         }
         public object Entity(int id)
         {

@@ -312,7 +312,9 @@ namespace ShipWalk
         }
         public static bool LimiterPrefix(Component __instance)
         {
-            try { return !(Runtime.Current?.Frame.Owns(__instance) ?? false) && !(Runtime.Current?.Frame.OwnsArrival(__instance) ?? false); }
+            try { return !(Runtime.Current?.Frame.Owns(__instance) ?? false) && !(Runtime.Current?.Frame.OwnsArrival(__instance) ?? false)
+                    && !(Runtime.Current?.Frame.OwnsPlacement(__instance) ?? false)
+                    && !(Runtime.Current?.Reconnect.Owns(__instance) ?? false); }
             catch (Exception error) { Runtime.Current?.Fail(error); return true; }
         }
         public static void DisablePrefix(Component __instance)
