@@ -10,6 +10,8 @@ So, with the help of **GPT-6 Astra**, I built ShipWalk.
 
 ## What we implemented
 
+ShipWalk uses a local reference-frame system to let players move relative to their ship. A separate local physics scene handles movement and interior collision, while the resulting position is translated back into the game world and synchronized with other players.
+
 - **Walking aboard moving ships**
   Players can move around aboard CVs, SVs, and HVs while the vessel is moving.
 
