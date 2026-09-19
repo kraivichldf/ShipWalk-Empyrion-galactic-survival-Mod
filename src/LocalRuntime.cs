@@ -53,6 +53,20 @@ namespace ShipWalk
         private IPlayfield playfield;
         private bool disposed, failed, stopping;
         private float lastFlush;
+        private float nextControlReport;
+        private int localLookInputs, reconnectLookInputs, placementLookInputs, nativeLookInputs;
+
+        // Development-only counters. No rotation or movement is changed here.
+        internal void TraceLook(Component candidate, Vector3 sample)
+        {
+            if (!Options.Trace || sample.sqrMagnitude == 0f) return;
+            IPlayer player = api.Application.LocalPlayer;
+            if (player == null || !ReferenceEquals(Map.ControllerEntity.GetValue(candidate), Map.NativeEntity(player))) return;
+            if (Frame.Owns(candidate)) localLookInputs++;
+            else if (Reconnect.Owns(candidate)) reconnectLookInputs++;
+            else if (Frame.OwnsPlacement(candidate) || Frame.OwnsArrival(candidate)) placementLookInputs++;
+            else nativeLookInputs++;
+        }
 
         public Runtime(IModApi api, string folder)
         {
@@ -203,6 +217,13 @@ namespace ShipWalk
             Network.Update();
             AutomaticStartup();
             Peers.Tick(control.Enabled && Options.Trace);
+            if (Options.Trace && api.Application.State == GameState.Running && Time.realtimeSinceStartup >= nextControlReport)
+            {
+                nextControlReport = Time.realtimeSinceStartup + 1f;
+                Log.Info("Control sample; " + Reconnect.Status + "; " + Frame.ControlStatus
+                    + "; flightLookLocal=" + localLookInputs + "; flightLookReconnect=" + reconnectLookInputs
+                    + "; flightLookPlacement=" + placementLookInputs + "; flightLookNative=" + nativeLookInputs);
+            }
             if (Time.realtimeSinceStartup - lastFlush > 1f) { Log.Flush(); lastFlush = Time.realtimeSinceStartup; }
         }
         public void StopFrame(string reason, bool inherit = true, bool reselect = true)
@@ -314,7 +335,7 @@ namespace ShipWalk
             }
             else if (disable)
             { Reconnect.Disable(); Travel.CancelLocal("command off"); control.Disable(); StopFrame("command off"); Options.Mode = RunMode.Diagnostics; }
-            else if (command == "trace" && args.Count == 2 && (args[1] == "on" || args[1] == "off")) { Reply("Automatic logging and CSV tracing are available only in the dev build."); return; }
+            else if (command == "trace" && args.Count == 2 && (args[1] == "on" || args[1] == "off")) { Options.Trace = args[1] == "on"; Reply("Development tracing=" + Options.Trace); return; }
             else if (command == "peers" && args.Count == 1) { Peers.Capture(); Reply("Observed peer positions printed above."); return; }
             else if (command == "network" && args.Count == 1) { Reply(Network.Status + "; " + Travel.Status); return; }
             else if (command != "status") { Reply("Commands: on, off, status, network, peers. Enable anywhere; ship detection is automatic, seated or on foot."); return; }

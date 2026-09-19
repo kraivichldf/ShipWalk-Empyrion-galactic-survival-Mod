@@ -75,6 +75,17 @@ namespace ShipWalk
             : shipBody.gameObject.activeInHierarchy ? shipBody.velocity : Vector3.zero;
         public int ShipId => ship == null ? -1 : map.Id(ship);
         public int Shapes => geometry?.Count ?? 0;
+        internal string ControlStatus => "localActive=" + Active + "; ship=" + ShipId
+            + "; placementHold=" + HoldingPlacement + "; arrivalHold=" + HoldingArrival
+            + "; controller=" + (controller == null ? "none" : ((controller as Behaviour)?.isActiveAndEnabled).ToString())
+            + "; kinematic=" + (body == null ? "none" : body.isKinematic.ToString())
+            + "; nativeTrigger=" + (nativeCapsule == null ? "none" : nativeCapsule.isTrigger.ToString())
+            + "; capsule=" + (nativeCapsule == null ? "none" : nativeCapsule.radius.ToString("F3") + "/" + nativeCapsule.height.ToString("F3"))
+            + "; grounded=" + grounded + "; climbing=" + climbing + "; flying=" + jetpackFlying
+            + "; jetEnabled=" + (actor == null ? "none" : JetpackEnabled.ToString())
+            + "; freeLook=" + (actor == null ? "none" : FreeLook.ToString())
+            + "; lookSamples=" + lookSamples + "; exitPlacement=" + (placement.Pending ? "Pending" : "None")
+            + "; clearance=" + (geometry?.ClearanceStatus ?? "none");
         public string Status => "frame=" + (Active ? "Active" : Armed ? "Armed" : Preparing ? "Preparing" : "Off")
             + "; ship=" + ShipId + "; shapes=" + Shapes + "; steps=" + steps
             + "; aboard=" + (aboardShip == null ? -1 : map.Id(aboardShip)) + "; vessels=" + (geometry?.MemberCount ?? 0)

@@ -1,5 +1,11 @@
 # ShipWalk — Empyrion Galactic Survival Mod
 
+> **Development branch:** diagnostic builds keep automatic tracing. Packages have
+> `-dev-` in their filenames. The current 0.4.15 diagnostic build retains the
+> 0.4.15 movement and reconnect behavior to investigate cramped movement after
+> leaving a seat and a separate jetpack camera lock. It is not a verified fix.
+> Use the quiet release from `main` for the published package.
+
 Empyrion is a great game for building ships, exploring star systems, and going on adventures with friends. But one missing feature has always bothered me: **being able to walk around a ship while it is moving.**
 
 Imagine building a huge capital vessel with a bridge, hangars, corridors, and rooms for your crew—then having to tell all your friends to sit down before you can go anywhere. For me, that breaks the feeling of being aboard a ship together.

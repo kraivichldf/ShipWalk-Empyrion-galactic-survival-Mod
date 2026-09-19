@@ -8,7 +8,7 @@ namespace ShipWalk
     internal sealed class Settings
     {
         public RunMode Mode = RunMode.Diagnostics;
-        public bool Trace => false;
+        public bool Trace = true;
         public bool PreserveInterior;
         public bool AllowMovingSeatExit = true;
         public bool PreserveExitMomentum = true;
@@ -32,8 +32,7 @@ namespace ShipWalk
                             throw new FormatException("Mode must be Off, Diagnostics or Experimental.");
                         settings.Mode = mode;
                         break;
-                    // Accept old configs, but do not restore automatic output.
-                    case "Trace": bool.Parse(value); break;
+                    case "Trace": settings.Trace = bool.Parse(value); break;
                     case "PreserveInterior": settings.PreserveInterior = bool.Parse(value); break;
                     case "AllowMovingSeatExit": settings.AllowMovingSeatExit = bool.Parse(value); break;
                     case "PreserveExitMomentum": settings.PreserveExitMomentum = bool.Parse(value); break;

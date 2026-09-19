@@ -38,6 +38,7 @@ namespace ShipWalk
         public bool Blocking => owner.MultiplayerClient && !done;
         public bool Restoring => Blocking && ticket != null;
         public string Status => "reconnect=" + (owner.PlayfieldServer ? "Worker" : done ? "Ready" : ticket == null ? "Checking" : "Restoring")
+            + "; reconnectHold=" + hold.Held + "; reconnectAge=" + (started < 0 ? 0 : Now - started).ToString("F2")
             + "; reconnectResult=" + (failure ?? "none");
         private static float Now => Time.realtimeSinceStartup;
         public ReconnectCoordinator(Runtime owner, IModApi api)
@@ -289,6 +290,7 @@ namespace ShipWalk
         private bool kinematic;
         private Vector3 point;
         public ReconnectHold(Runtime owner, IModApi api) { this.owner = owner; this.api = api; }
+        public bool Held => body != null;
         public bool Owns(Component c) => body != null && controller == c;
         public bool OwnsActor(object candidate) => body != null && ReferenceEquals(actor, candidate);
         public void Hold()

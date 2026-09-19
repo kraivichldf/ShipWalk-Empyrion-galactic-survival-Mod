@@ -12,9 +12,14 @@ namespace ShipWalk
         private readonly IModApi api;
         private readonly Build5150 map;
         private readonly TraceLog log;
+        private float nextReport;
         public PeerDiagnostics(IModApi api, Build5150 map, TraceLog log)
         { this.api = api; this.map = map; this.log = log; }
-        public void Tick(bool enabled) { }
+        public void Tick(bool enabled)
+        {
+            if (!enabled || api.Application.Mode != ApplicationMode.Client || Time.realtimeSinceStartup < nextReport) return;
+            nextReport = Time.realtimeSinceStartup + 5f; Capture();
+        }
         public void Capture()
         {
             try { CapturePlayers(); }

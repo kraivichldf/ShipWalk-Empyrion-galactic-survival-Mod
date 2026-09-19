@@ -38,7 +38,7 @@ foreach ($role in @('Client','Coop','Standalone')) {
 }
 
 $package = Join-Path $PSScriptRoot 'dist\ShipWalk'
-& (Join-Path $PSScriptRoot 'Verify-ReleaseOutput.ps1') -GameRoot $resolvedGame
+& (Join-Path $PSScriptRoot 'Verify-DevelopmentOutput.ps1') -GameRoot $resolvedGame
 $projectXml = [xml](Get-Content -LiteralPath (Join-Path $PSScriptRoot 'src\ShipWalk.csproj') -Raw)
 $version = $projectXml.Project.PropertyGroup.Version | Where-Object { $_ } | Select-Object -First 1
 $null = New-Item -ItemType Directory -Path $package -Force
@@ -57,11 +57,11 @@ $manifest = foreach ($name in $manifestNames) {
     [pscustomobject]@{ File = $name; SHA256 = (Get-FileHash -LiteralPath (Join-Path $package $name) -Algorithm SHA256).Hash }
 }
 $manifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $package 'manifest.json') -Encoding utf8
-$archive = Join-Path $PSScriptRoot "dist\ShipWalk-Multiplayer-$version-build5150.zip"
+$archive = Join-Path $PSScriptRoot "dist\ShipWalk-Multiplayer-$version-dev-build5150.zip"
 # Use an explicit file list: never package referenced official assemblies or stale build outputs.
 $archiveFiles = @($manifestNames | ForEach-Object { Join-Path $package $_ }) + @((Join-Path $package 'manifest.json'))
 Compress-Archive -LiteralPath $archiveFiles -DestinationPath $archive -Force
-$serverArchive = Join-Path $PSScriptRoot "dist\ShipWalk-DedicatedServer-$version-build5150.zip"
+$serverArchive = Join-Path $PSScriptRoot "dist\ShipWalk-DedicatedServer-$version-dev-build5150.zip"
 Add-Type -AssemblyName System.IO.Compression
 # Build the server tree directly from the verified file list; do not include staging leftovers.
 $zipStream = [IO.File]::Open($serverArchive, [IO.FileMode]::Create)

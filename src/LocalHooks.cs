@@ -266,6 +266,7 @@ namespace ShipWalk
             try
             {
                 Runtime r = Runtime.Current;
+                r?.TraceLook(__instance, __0);
                 if (r?.Frame.Owns(__instance) != true) return true;
                 r.Frame.ApplyLook(__0);
                 return false;

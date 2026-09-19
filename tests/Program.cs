@@ -47,9 +47,9 @@ internal static class Program
             Test("disconnect and missing ship during recovery retain bounded non-destructive fallback", ReconnectTests.PendingDisconnectAndMissingShip);
             Test("reconnect survives worker handover without accepting old completion or replayed saves", ReconnectTests.CrossWorkerAndReplay);
             Test("confirmed destroyed vessel clears its record and releases recovery without a repeated login loop", ReconnectTests.ConfirmedDestroyedVessel);
-            Test("release output emits only explicit replies and retains errors without log IO", QuietReleaseTests.CommandOnlyOutput);
-            Test("legacy Trace=true cannot reenable automatic logging", QuietReleaseTests.LegacyTraceConfig);
-            Test("release logger construction creates no log directory or CSV", QuietReleaseTests.NoTraceFiles);
+            Test("development output records diagnostics and retains explicit status", DevelopmentTraceTests.AutomaticOutput);
+            Test("development trace option does not change movement options", DevelopmentTraceTests.TraceConfig);
+            Test("development CSV tracing stays within its session budget", DevelopmentTraceTests.BoundedCsv);
             Test("recorded CV collision omission includes docked SV and removes it on undock", DockingTests.RecordedCollisionOmission);
             Test("docking roots retain airborne/seat association and reject unrelated or cyclic graphs", DockingTests.RootAndAssociation);
             Test("undock and redock preserve world position facing and linear/angular momentum", DockingTests.ContinuousRebase);
@@ -281,7 +281,7 @@ internal static class Program
             Test("configuration defaults to non-mutating diagnostics", () =>
             {
                 var settings = Settings.Load(Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".missing"));
-                Check(settings.Mode == RunMode.Diagnostics && !settings.Trace && !settings.PreserveInterior && settings.AllowMovingSeatExit && settings.PreserveExitMomentum);
+                Check(settings.Mode == RunMode.Diagnostics && settings.Trace && !settings.PreserveInterior && settings.AllowMovingSeatExit && settings.PreserveExitMomentum);
             });
             Test("seat-exit configuration can disable and re-enable the feature", () =>
             {
